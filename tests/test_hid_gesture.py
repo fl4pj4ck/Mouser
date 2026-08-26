@@ -540,6 +540,44 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
             ],
         )
 
+    def test_reapply_spy_after_receiver_link(self):
+        """0x41 link-up rewrites patched remapping + Start (nibble)."""
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener._dev_idx = 0x01
+        listener._mouse_button_spy_idx = 0x0C
+        listener._spy_started = True
+        listener._spy_remap_original = [i + 1 for i in range(16)]
+        listener._spy_remap_patched = list(listener._spy_remap_original)
+        listener._spy_remap_patched[4] = 0
+        listener._spy_remap_patched[8] = 0
+        calls = []
+
+        def fake_request(feat, func, params, timeout_ms=2000, count_timeout=True):
+            calls.append((feat, func, list(params)))
+            return (0x11, feat, func, 0xA, [0x00])
+
+        with (
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch("builtins.print"),
+        ):
+            # Receiver link notification: feat=0x41, params[0] bit6 clear = up.
+            raw = bytes([0x10, 0x01, 0x41, 0x00, 0x00] + [0x00] * 2)
+            listener._on_report(raw)
+            self.assertTrue(listener._pending_spy_reapply)
+            listener._apply_pending_spy_reapply()
+
+        set_calls = [c for c in calls if c[0] == 0x0C and c[1] == 4]
+        start_calls = [c for c in calls if c[0] == 0x0C and c[1] == 1]
+        self.assertEqual(len(set_calls), 1)
+        self.assertEqual(set_calls[0][2][4], 0)
+        self.assertEqual(set_calls[0][2][8], 0)
+        self.assertEqual(set_calls[0][2][0], 1)
+        self.assertEqual(len(start_calls), 1)
+        # Must not replace original with the already-patched device table.
+        self.assertEqual(listener._spy_remap_original[4], 5)
+        self.assertFalse(listener._pending_spy_reapply)
+
     def test_on_report_routes_spy_without_reprog(self):
         events = []
         listener = hid_gesture.HidGestureListener(
@@ -747,6 +785,8 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
 
         self.assertTrue(listener._spy_started)
         self.assertEqual(listener._spy_remap_original, original)
+        self.assertEqual(listener._spy_remap_patched[4], 0)
+        self.assertEqual(listener._spy_remap_patched[8], 0)
         set_calls = [c for c in calls if c[0] == 0x0C and c[1] == 4]
         self.assertEqual(len(set_calls), 1)
         patched = set_calls[0][2]

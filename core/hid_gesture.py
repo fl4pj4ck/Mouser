@@ -1276,7 +1276,9 @@ class HidGestureListener:
         self._spy_bitmap = 0
         self._spy_held = {button: False for _bit, button in G502_SPY_BIT_BUTTONS}
         self._spy_remap_original = None  # fn3 table before we zero remapped bits
+        self._spy_remap_patched = None   # table we write (reapplied after wake)
         self._spy_started = False
+        self._pending_spy_reapply = False
         self._onboard_mode = None
         self._onboard_desc = None
         self._prefer_host_mode = False
@@ -2500,6 +2502,7 @@ class HidGestureListener:
         for bit, _button in G502_SPY_BIT_BUTTONS:
             if bit < 16:
                 patched[bit] = 0
+        self._spy_remap_patched = list(patched)
 
         self._request(
             fi, 4, patched, timeout_ms=timeout_ms, count_timeout=False
@@ -2512,6 +2515,39 @@ class HidGestureListener:
             f"{[bit for bit, _ in G502_SPY_BIT_BUTTONS]}"
         )
         return True
+
+    def _reapply_mouse_button_spy(self, timeout_ms=800):
+        """Rewrite patched remapping + Start after sleep/wake (nibble).
+
+        Firmware drops the runtime spy table on link reset; do not re-read
+        the table here or we would treat zeros as the factory original.
+        """
+        fi = self._mouse_button_spy_idx
+        if fi is None or not self._spy_started:
+            return False
+        patched = self._spy_remap_patched
+        if not patched:
+            return False
+        table = list(patched)
+        while len(table) < 16:
+            table.append(0)
+        self._request(
+            fi, 4, table, timeout_ms=timeout_ms, count_timeout=False
+        )
+        self._request(fi, 1, [], timeout_ms=timeout_ms, count_timeout=False)
+        self._spy_bitmap = 0
+        self._spy_held = {button: False for _bit, button in G502_SPY_BIT_BUTTONS}
+        print("[HidGesture] MouseButtonSpy reapplied after wake")
+        return True
+
+    def _apply_pending_spy_reapply(self):
+        if not self._pending_spy_reapply:
+            return
+        self._pending_spy_reapply = False
+        try:
+            self._reapply_mouse_button_spy()
+        except Exception as exc:
+            print(f"[HidGesture] spy reapply failed: {exc}")
 
     def _disable_mouse_button_spy(self, timeout_ms=800):
         """Stop spy notifications and restore the remapping table."""
@@ -2528,6 +2564,8 @@ class HidGestureListener:
             )
         self._spy_started = False
         self._spy_remap_original = None
+        self._spy_remap_patched = None
+        self._pending_spy_reapply = False
         print("[HidGesture] MouseButtonSpy stopped; remapping restored")
 
     def _probe_onboard_profiles_readonly(self, timeout_ms=800):
@@ -3357,6 +3395,14 @@ class HidGestureListener:
             return
         _, feat, func, _sw, params = msg
 
+        # Receiver device-link notification (HID++ 1.0 style). Link-up
+        # clears runtime spy remapping — queue reapply on the main loop.
+        if feat == 0x41:
+            link_byte = int(params[0]) if params else 0
+            if (link_byte & 0x40) == 0 and self._spy_started:
+                self._pending_spy_reapply = True
+            return
+
         # Unsolicited battery status broadcast (feature 0x1004 / 0x1000,
         # event func 0) — pushed to the UI so charging shows instantly.
         # `_sw != MY_SW` excludes our own polled getStatus responses (which
@@ -3587,7 +3633,9 @@ class HidGestureListener:
             self._spy_bitmap = 0
             self._spy_held = {button: False for _bit, button in G502_SPY_BIT_BUTTONS}
             self._spy_remap_original = None
+            self._spy_remap_patched = None
             self._spy_started = False
+            self._pending_spy_reapply = False
             self._onboard_mode = None
             self._onboard_desc = None
             self._rawxy_enabled = False
@@ -4181,12 +4229,19 @@ class HidGestureListener:
                                 except Exception:
                                     pass
                             print("[HidGesture] Device woke from sleep")
+                            try:
+                                self._reapply_mouse_button_spy()
+                            except Exception as exc:
+                                print(f"[HidGesture] spy reapply on wake: {exc}")
                             self._on_report(raw)
                         continue
 
                     # Opt-in Host mode before DPI so replay writes stickier.
                     if self._pending_host_mode:
                         self._apply_pending_host_mode()
+
+                    if self._pending_spy_reapply:
+                        self._apply_pending_spy_reapply()
 
                     # Apply any queued DPI command
                     if self._pending_dpi is not None:
@@ -4256,7 +4311,9 @@ class HidGestureListener:
             self._spy_bitmap = 0
             self._spy_held = {button: False for _bit, button in G502_SPY_BIT_BUTTONS}
             self._spy_remap_original = None
+            self._spy_remap_patched = None
             self._spy_started = False
+            self._pending_spy_reapply = False
             self._onboard_mode = None
             self._onboard_desc = None
             if self._held:

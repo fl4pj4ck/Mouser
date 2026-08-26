@@ -224,19 +224,21 @@ Discover at connect; expose slider only if feature index found; same “no Host 
 
 **Exit:** Q1 acceptance with Host opt-in or replay-only if Host still unsafe.
 
-### Phase C — Onboard-owned buttons (research spike then build)
+### Phase C — Onboard-owned buttons ✅
 
-1. Spike `0x8110` MOUSE_BUTTON_SPY on G502 X  
-2. Spike read-only onboard profile dump (`0x8100`)  
-3. Decide: spy path vs profile rewrite vs document as unsupported  
-4. Implement chosen path + tests + Windows bat patch bump
+1. Spike `0x8110` MOUSE_BUTTON_SPY on G502 X — **done** (nibble Start/zero)
+2. Spike read-only onboard profile dump (`0x8100`) — **done** (read-only)
+3. Decide: spy path vs profile rewrite vs document as unsupported — **spy path**
+4. Implement chosen path + tests — **done** (G502 X map: sniper=bit4, DPI=bit8)
+5. Reapply spy remapping after sleep / `0x41` link-up — **in progress**
 
-**Exit:** Q2 resolved as either remappable or explicitly unsupported.
+**Exit:** Q2 remappable via runtime MouseButtonSpy (no flash).
 
-### Phase D — Stretch
+### Phase D — Stretch / hardening
 
-1. Report rate (Q6)  
+1. Report rate (Q6)
 2. Optional profile DPI stage editor (full Solaar-like)
+3. Verify spy remaps survive sleep/wake on hardware after reapply
 
 ---
 
