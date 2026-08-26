@@ -864,6 +864,57 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         self.assertEqual(calls, [(0x0D, 2, [0x02])])  # 2 ms = 500 Hz
         self.assertEqual(listener._report_rate_hz, 500)
 
+    def test_onboard_active_profile_dpi_readonly(self):
+        """Parse active profile DPI stages from memoryRead (Solaar layout)."""
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener._dev_idx = 0x01
+        listener._onboard_profiles_idx = 0x09
+        listener._onboard_desc = {
+            "memory": 1,
+            "profile": 5,
+            "count": 5,
+            "buttons": 11,
+            "sectors": 16,
+            "size": 255,
+        }
+
+        # Sector bytes: rate=1ms, default=1, shift=0,
+        # DPI 800,1200,1600,2400,3200 little-endian.
+        sector = bytearray(16)
+        sector[0] = 0x01
+        sector[1] = 0x01
+        sector[2] = 0x00
+        for i, dpi in enumerate((800, 1200, 1600, 2400, 3200)):
+            sector[3 + i * 2] = dpi & 0xFF
+            sector[4 + i * 2] = (dpi >> 8) & 0xFF
+
+        def fake_request(feat, func, params, timeout_ms=2000, count_timeout=True):
+            if feat == 0x09 and func == 4:
+                # getCurrentProfile → sector 0x0001
+                return (0x11, 0x09, 0x4, 0xA, [0x00, 0x01])
+            if feat == 0x09 and func == 5:
+                return (0x11, 0x09, 0x5, 0xA, list(sector))
+            return None
+
+        with (
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch("builtins.print"),
+        ):
+            info = listener._read_active_profile_dpi(timeout_ms=400)
+
+        self.assertEqual(
+            info,
+            {
+                "sector": 1,
+                "report_rate_ms": 1,
+                "default_index": 1,
+                "shift_index": 0,
+                "resolutions": [800, 1200, 1600, 2400, 3200],
+            },
+        )
+        self.assertEqual(listener._onboard_active_dpi, info)
+
     def test_host_mode_switch_once_when_prefer_enabled(self):
         """Opt-in Host mode uses 0x8100 once; never via setSensorDpi."""
         listener = hid_gesture.HidGestureListener()

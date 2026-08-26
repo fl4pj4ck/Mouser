@@ -1288,6 +1288,7 @@ class HidGestureListener:
         self._pending_spy_reapply = False
         self._onboard_mode = None
         self._onboard_desc = None
+        self._onboard_active_dpi = None
         self._prefer_host_mode = False
         self._host_mode_applied = False
         self._pending_host_mode = False
@@ -1608,6 +1609,7 @@ class HidGestureListener:
                 "supported": self._onboard_profiles_idx is not None,
                 "mode": self._onboard_mode,
                 "descriptors": self._onboard_desc,
+                "active_dpi": self._onboard_active_dpi,
                 "writes_enabled": False,
             },
             "report_rate": {
@@ -2728,7 +2730,64 @@ class HidGestureListener:
                 "sectors": int(p[6]),
                 "size": (int(p[7]) << 8) | int(p[8]),
             }
+        self._read_active_profile_dpi(timeout_ms=timeout_ms)
         return fi
+
+    def _read_active_profile_dpi(self, timeout_ms=800):
+        """Read-only: active profile DPI stages (Solaar OnboardProfile layout).
+
+        fn4 getCurrentProfile → sector; fn5 memoryRead 16 bytes at offset 0.
+        Never writes flash.
+        """
+        fi = self._onboard_profiles_idx
+        if fi is None:
+            return None
+
+        cur = self._request(
+            fi, 4, [], timeout_ms=timeout_ms, count_timeout=False
+        )
+        if not cur or not cur[4] or len(cur[4]) < 2:
+            return None
+        sector = (int(cur[4][0]) << 8) | int(cur[4][1])
+        if sector == 0 or sector == 0xFFFF:
+            return None
+
+        chunk = self._request(
+            fi,
+            5,
+            [
+                (sector >> 8) & 0xFF,
+                sector & 0xFF,
+                0x00,
+                0x00,
+            ],
+            timeout_ms=timeout_ms,
+            count_timeout=False,
+        )
+        if not chunk or not chunk[4] or len(chunk[4]) < 13:
+            return None
+
+        raw = chunk[4]
+        resolutions = []
+        for i in range(5):
+            lo = int(raw[3 + i * 2])
+            hi = int(raw[4 + i * 2])
+            resolutions.append(lo | (hi << 8))
+
+        info = {
+            "sector": sector,
+            "report_rate_ms": int(raw[0]),
+            "default_index": int(raw[1]),
+            "shift_index": int(raw[2]),
+            "resolutions": resolutions,
+        }
+        self._onboard_active_dpi = info
+        print(
+            f"[HidGesture] Onboard profile sector=0x{sector:04X} "
+            f"DPI={resolutions} default={info['default_index']} "
+            f"shift={info['shift_index']}"
+        )
+        return info
 
     def _handle_spy_notification(self, params):
         """Diff MouseButtonSpy bitmap and fire remappable button callbacks."""
@@ -3778,6 +3837,7 @@ class HidGestureListener:
             self._pending_report_rate = None
             self._onboard_mode = None
             self._onboard_desc = None
+            self._onboard_active_dpi = None
             self._rawxy_enabled = False
             self._hires_wheel_idx = None
             self._hires_wheel_multiplier = None
@@ -4464,6 +4524,7 @@ class HidGestureListener:
             self._pending_report_rate = None
             self._onboard_mode = None
             self._onboard_desc = None
+            self._onboard_active_dpi = None
             if self._held:
                 self._held = False
                 print("[HidGesture] Gesture force-released on disconnect")
