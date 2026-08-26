@@ -1283,7 +1283,12 @@ class Engine:
                 self._replay_inflight = False
                 should_emit_failure = not replay_ok
             if should_emit_failure:
-                labels = ", ".join(failed) if failed else "settings"
+                # Connection-only failures mean the session died mid-replay;
+                # the waiting UI already covers that — don't toast.
+                meaningful = [label for label in failed if label != "connection"]
+                if not meaningful:
+                    return
+                labels = ", ".join(meaningful)
                 self._emit_status(
                     f"Mouse reconnected, but could not restore: {labels}."
                 )

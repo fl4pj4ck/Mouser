@@ -481,6 +481,7 @@ class BaseMouseHook:
             on_thumb_button_up=self._on_hid_thumb_button_up,
             on_thumb_button_move=self._on_hid_thumb_button_move,
             on_battery=self._on_hid_battery,
+            on_status=self._emit_status,
         )
         self._hid_gesture = listener
         if not listener.start():

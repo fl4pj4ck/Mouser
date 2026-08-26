@@ -516,19 +516,22 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
         )
         threads = []
 
-        with patch("core.engine.threading.Thread", side_effect=self._thread_factory(threads)):
+        with (
+            patch("core.engine.threading.Thread", side_effect=self._thread_factory(threads)),
+            patch("core.engine.time.sleep", return_value=None),
+        ):
             engine._on_connection_change(True)
             engine.hook._hid_gesture.connected_device = SimpleNamespace(name="MX Master 3S")
             engine._on_connection_change(True)
 
-        replay_threads = self._non_battery_threads(threads)
-        self.assertEqual(len(replay_threads), 1)
-        replay_threads[0].run_target()
+            replay_threads = self._non_battery_threads(threads)
+            self.assertEqual(len(replay_threads), 1)
+            replay_threads[0].run_target()
 
-        self.assertTrue(status_messages)
         self.assertTrue(
             any(
-                "could not be restored" in message.lower()
+                "could not restore" in message.lower()
+                and "dpi" in message.lower()
                 for message in status_messages
             ),
             status_messages,
@@ -557,16 +560,50 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
             engine.hook._hid_gesture.connected_device = SimpleNamespace(name="G502 X")
             engine._on_connection_change(True)
 
-        replay_threads = self._non_battery_threads(threads)
-        self.assertEqual(len(replay_threads), 1)
-        replay_threads[0].run_target()
+            replay_threads = self._non_battery_threads(threads)
+            self.assertEqual(len(replay_threads), 1)
+            replay_threads[0].run_target()
 
         self.assertGreaterEqual(engine.hook._hid_gesture.set_dpi.call_count, 1)
         self.assertTrue(
             any(
-                "could not be restored" in message.lower()
+                "could not restore" in message.lower()
+                and "dpi" in message.lower()
                 for message in status_messages
             ),
+            status_messages,
+        )
+
+    def test_connection_only_restore_failure_skips_toast(self):
+        # Brief hid_ready then drop during the 3s settle must not spam toasts.
+        engine = self._make_engine()
+        status_messages = []
+        engine.set_status_callback(status_messages.append)
+        engine.hook._hid_gesture = self._make_hid(
+            connected_device=SimpleNamespace(name="G502 X"),
+            dpi_result=True,
+            smart_shift_result=True,
+            smart_shift_supported=False,
+            os_level_connect=True,
+            dpi_supported=True,
+        )
+        threads = []
+
+        def drop_connection(_seconds):
+            engine.hook._hid_gesture.connected_device = None
+
+        with (
+            patch("core.engine.threading.Thread", side_effect=self._thread_factory(threads)),
+            patch("core.engine.time.sleep", side_effect=drop_connection),
+        ):
+            engine._on_connection_change(True)
+
+            replay_threads = self._non_battery_threads(threads)
+            self.assertEqual(len(replay_threads), 1)
+            replay_threads[0].run_target()
+
+        self.assertFalse(
+            any("could not restore" in message.lower() for message in status_messages),
             status_messages,
         )
 

@@ -254,6 +254,14 @@ def _log_once(key, message):
     print(message)
 
 
+# Shown in the UI toast when a G502-family mouse is seen only on a non-HID++
+# interface (e.g. Windows VHF stub) or ADJUSTABLE_DPI cannot be discovered.
+STATUS_NEED_LIGHTSPEED_HIDPP = (
+    "Need Lightspeed HID++ (046D:C547) with DPI — not a VHF stub"
+)
+_STATUS_NEED_HIDPP_COOLDOWN_S = 30.0
+
+
 def _device_path_display(path):
     if isinstance(path, memoryview):
         path = bytes(path)
@@ -1093,7 +1101,7 @@ class HidGestureListener:
                  on_connect=None, on_disconnect=None, extra_diverts=None,
                  on_wheel=None, on_thumbwheel=None,
                  on_thumb_button_down=None, on_thumb_button_up=None,
-                 on_thumb_button_move=None, on_battery=None):
+                 on_thumb_button_move=None, on_battery=None, on_status=None):
         self._on_down       = on_down
         self._on_up         = on_up
         self._on_move       = on_move
@@ -1103,6 +1111,10 @@ class HidGestureListener:
         # unsolicited HID++ battery status broadcast (e.g. USB plugged in),
         # so the UI updates instantly instead of waiting for the next poll.
         self._on_battery    = on_battery
+        # UI status toast callback (optional). Used for user-facing connect
+        # diagnostics such as "need Lightspeed HID++, not VHF".
+        self._on_status     = on_status
+        self._user_status_until = {}
         # Accepted for divert+inject-era callers; native-invert never
         # sees wheelMovement / thumbwheelEvent notifications.
         self._on_wheel = on_wheel
@@ -1275,6 +1287,26 @@ class HidGestureListener:
     @property
     def connected_device(self):
         return self._connected_device_info
+
+    def _emit_user_status(self, message, *, key=None, cooldown_s=None):
+        """Toast-worthy status for the UI; rate-limited to avoid reconnect spam."""
+        if self._on_status is None or not message:
+            return
+        now = time.monotonic()
+        status_key = key or message
+        until = self._user_status_until.get(status_key, 0.0)
+        if now < until:
+            return
+        cool = (
+            _STATUS_NEED_HIDPP_COOLDOWN_S
+            if cooldown_s is None
+            else float(cooldown_s)
+        )
+        self._user_status_until[status_key] = now + cool
+        try:
+            self._on_status(message)
+        except Exception:
+            pass
 
     def _discovered_feature_ids(self):
         feature_ids = []
@@ -3537,6 +3569,10 @@ class HidGestureListener:
                         f"PID=0x{int(pid or 0):04X} UP=0x{opened_up:04X} "
                         f"product={product or '?'} "
                         "(need Lightspeed/vendor HID++ interface, not VHF stub)"
+                    )
+                    self._emit_user_status(
+                        STATUS_NEED_LIGHTSPEED_HIDPP,
+                        key="need-lightspeed-hidpp",
                     )
 
                 print(

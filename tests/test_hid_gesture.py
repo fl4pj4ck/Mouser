@@ -493,7 +493,8 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
 
     def test_try_connect_rejects_g502_without_adjustable_dpi(self):
         """Catalog match alone must not claim connected with empty features."""
-        listener = hid_gesture.HidGestureListener()
+        status_messages = []
+        listener = hid_gesture.HidGestureListener(on_status=status_messages.append)
         info = {
             "product_id": 0xC098,
             "usage_page": 0xFF00,
@@ -526,6 +527,50 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         messages = self._printed_messages(print_mock)
         self.assertTrue(
             any("ADJUSTABLE_DPI not found" in message for message in messages)
+        )
+        # Phase A Q5: surface a clear UI status, not console-only.
+        self.assertTrue(
+            any("Lightspeed HID++" in message for message in status_messages),
+            status_messages,
+        )
+
+    def test_missing_hidpp_status_is_rate_limited(self):
+        """Reconnect loops must not spam the same missing-HID++ toast."""
+        status_messages = []
+        listener = hid_gesture.HidGestureListener(on_status=status_messages.append)
+        info = {
+            "product_id": 0xC098,
+            "usage_page": 0xFF00,
+            "usage": 0x0001,
+            "transport": "-",
+            "source": "hidapi-enumerate",
+            "product_string": "G502 X LIGHTSPEED",
+            "path": b"/dev/hidraw-g502x",
+        }
+        fake_dev = _FakeHidDevice()
+
+        with (
+            patch.object(listener, "_vendor_hid_infos", return_value=[info]),
+            patch.object(listener, "_find_feature", return_value=None),
+            patch.object(listener, "_query_device_name", return_value=None),
+            patch.object(hid_gesture, "HIDAPI_OK", True),
+            patch.object(hid_gesture, "_BACKEND_PREFERENCE", "hidapi"),
+            patch.object(hid_gesture, "_HID_API_STYLE", "hidapi"),
+            patch.object(
+                hid_gesture,
+                "_hid",
+                SimpleNamespace(device=lambda: fake_dev),
+                create=True,
+            ),
+            patch("builtins.print"),
+        ):
+            self.assertFalse(listener._try_connect())
+            self.assertFalse(listener._try_connect())
+
+        self.assertEqual(
+            sum(1 for m in status_messages if "Lightspeed HID++" in m),
+            1,
+            status_messages,
         )
 
     def test_try_connect_g502_retries_dpi_after_short_probe_miss(self):

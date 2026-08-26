@@ -76,8 +76,9 @@ MX_ANYWHERE_SMARTSHIFT_BUTTONS = (
 # firmware emits as standard OS events in its default profile: middle click,
 # back/forward side buttons, and wheel tilt left/right. The DPI up/down and
 # sniper buttons are consumed onboard and never reach the OS. ADJUSTABLE_DPI
-# (0x2201) is exposed; Host mode via ONBOARD_PROFILES (0x8100) is required
-# before setSensorDpi writes stick (same as Solaar "Disabled").
+# (0x2201) is exposed and live setSensorDpi works without Host mode.
+# ONBOARD_PROFILES Host mode (0x8100) is optional and risky on this path
+# (can reset LEDs / drop the link); never switch Host on every DPI write.
 G502_BUTTONS = (
     "middle",
     "xbutton1",
@@ -511,9 +512,9 @@ LOGI_DEVICE_LAYOUTS = {
         # right button set from the layout dropdown.
         "manual_selectable": True,
         "note": (
-            "G502 buttons are remapped at the OS level. DPI up/down and the "
-            "sniper button are handled by the mouse's onboard profile and "
-            "cannot be remapped here yet."
+            "G502 remaps middle / back / forward / wheel tilt at the OS level. "
+            "Gesture, mode shift, and DPI switch need REPROG_V4 (not on this "
+            "mouse). DPI up/down and sniper stay onboard-only."
         ),
         "hotspots": [],
     },
