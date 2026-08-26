@@ -813,5 +813,36 @@ class WheelInvertConnectThreadingTests(unittest.TestCase):
             request.assert_called_once_with(True, False)
 
 
+class EngineOnboardDpiSummaryTests(unittest.TestCase):
+    def _make_engine(self):
+        from core.engine import Engine
+
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        with (
+            patch("core.engine.MouseHook", _FakeMouseHook),
+            patch("core.engine.AppDetector", _FakeAppDetector),
+            patch("core.engine.load_config", return_value=cfg),
+        ):
+            return Engine()
+
+    def test_onboard_dpi_summary_marks(self):
+        engine = self._make_engine()
+        engine.hook._hid_gesture = SimpleNamespace(
+            _onboard_active_dpi={
+                "default_index": 1,
+                "shift_index": 0,
+                "resolutions": [800, 1200, 1600, 0, 0],
+            }
+        )
+        self.assertEqual(
+            engine.onboard_dpi_summary,
+            "800s / 1200* / 1600",
+        )
+
+    def test_onboard_dpi_summary_empty(self):
+        engine = self._make_engine()
+        self.assertEqual(engine.onboard_dpi_summary, "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -891,6 +891,18 @@ class Backend(QObject):
         if self._engine:
             self._engine.set_report_rate(hz)
 
+    @Property(bool, notify=hidFeaturesReadyChanged)
+    def onboardDpiVisible(self):
+        return bool(
+            self._engine and getattr(self._engine, "onboard_dpi_summary", "")
+        )
+
+    @Property(str, notify=hidFeaturesReadyChanged)
+    def onboardDpiSummary(self):
+        if not self._engine:
+            return ""
+        return str(getattr(self._engine, "onboard_dpi_summary", "") or "")
+
     @Property(int, notify=settingsChanged)
     def gestureThreshold(self):
         return int(self._cfg.get("settings", {}).get("gesture_threshold", 50))

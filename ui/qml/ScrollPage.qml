@@ -400,6 +400,56 @@ Item {
                             }
                         }
                     }
+
+                    Rectangle {
+                        width: parent.width
+                        height: onboardDpiCol.implicitHeight + 20
+                        radius: 10
+                        color: scrollPage.theme.bgSubtle
+                        visible: backend.onboardDpiVisible
+
+                        Column {
+                            id: onboardDpiCol
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+                                top: parent.top
+                                margins: 14
+                            }
+                            spacing: 4
+
+                            Text {
+                                text: s["scroll.onboard_dpi"]
+                                font {
+                                    family: uiState.fontFamily
+                                    pixelSize: 13
+                                }
+                                color: scrollPage.theme.textPrimary
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: backend.onboardDpiSummary
+                                font {
+                                    family: uiState.fontFamily
+                                    pixelSize: 12
+                                }
+                                color: scrollPage.theme.textSecondary
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: s["scroll.onboard_dpi_hint"]
+                                font {
+                                    family: uiState.fontFamily
+                                    pixelSize: 11
+                                }
+                                color: scrollPage.theme.textSecondary
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
                 }
             }
 

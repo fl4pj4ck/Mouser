@@ -239,7 +239,7 @@ Discover at connect; expose slider only if feature index found; same “no Host 
 ### Phase D — Stretch / hardening
 
 1. Report rate (Q6) — **done**: discover `0x8060`; write only when Host opt-in on
-2. Read-only active onboard DPI stages in device dump — **in progress**
+2. Read-only active onboard DPI stages in device dump + Scroll UI — **done**
 3. Optional profile DPI stage *editor* (flash write) — still out of v1
 4. ~~Verify spy remaps survive sleep/wake~~ — **done**
 

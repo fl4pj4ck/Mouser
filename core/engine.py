@@ -1563,6 +1563,37 @@ class Engine:
         choices = list(getattr(hg, "_report_rate_hz_list", None) or [])
         return choices
 
+    @property
+    def onboard_dpi_info(self):
+        """Read-only active onboard profile DPI stages, or None."""
+        hg = getattr(self.hook, "_hid_gesture", None)
+        info = getattr(hg, "_onboard_active_dpi", None)
+        return dict(info) if isinstance(info, dict) else None
+
+    @property
+    def onboard_dpi_summary(self):
+        info = self.onboard_dpi_info
+        if not info:
+            return ""
+        stages = list(info.get("resolutions") or [])
+        if not stages:
+            return ""
+        default_i = int(info.get("default_index", 0))
+        shift_i = int(info.get("shift_index", 0))
+        parts = []
+        for i, dpi in enumerate(stages):
+            if int(dpi) <= 0:
+                continue
+            mark = ""
+            if i == default_i:
+                mark += "*"
+            if i == shift_i:
+                mark += "s"
+            parts.append(f"{int(dpi)}{mark}")
+        if not parts:
+            return ""
+        return " / ".join(parts)
+
     def set_smart_shift(self, mode, smart_shift_enabled=False, threshold=25, scroll_force=50):
         """Send Smart Shift settings to device.
         mode: 'ratchet' or 'freespin' (fixed mode when smart_shift_enabled=False)
