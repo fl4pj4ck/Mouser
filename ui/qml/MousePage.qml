@@ -1020,7 +1020,7 @@ Item {
                         // list so the share card below is never overlapped.
                         height: backend.mouseConnected && !backend.hasInteractiveDeviceLayout
                                 ? Math.max(420, fallbackCard.height + 48)
-                                : 420
+                                : Math.max(420, backend.deviceImageHeight + 24)
 
                         Rectangle {
                             anchors.fill: parent

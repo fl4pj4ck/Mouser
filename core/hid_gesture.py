@@ -1068,12 +1068,15 @@ ONBOARD_MODE_HOST = 0x02
 # G502 X Lightspeed MouseButtonSpy bitmap → Mouser buttons.
 # Measured via tools/spy_guided.py (not HERO/nibble G6=bit5):
 #   bit0 L, bit1 R, bit2 M, bit3 back, bit4 sniper, bit5 forward,
-#   bit6 tilt L, bit7 tilt R, bit8 DPI-behind-wheel.
+#   bit6 tilt L, bit7 tilt R, bit8 DPI-behind-wheel,
+#   bit9 DPI-down (G8 edge), bit10 DPI-up (G7 edge).
 # Protocol (nibble): fn3 getRemapping, fn4 setRemapping (0=divert),
 # fn1 Start, fn2 Stop — then unsolicited bitmaps arrive.
 G502_SPY_BIT_BUTTONS = (
     (4, "sniper"),       # thumb DPI-shift / sniper (params 00 10)
     (8, "dpi_switch"),   # DPI button behind the scroll wheel (params 01 00)
+    (9, "dpi_down"),     # edge DPI- (params 02 00)
+    (10, "dpi_up"),      # edge DPI+ (params 04 00)
 )
 G502_SPY_BUTTONS = tuple(button for _bit, button in G502_SPY_BIT_BUTTONS)
 DEFAULT_GESTURE_CID = DEFAULT_GESTURE_CIDS[0]

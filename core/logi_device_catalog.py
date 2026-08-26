@@ -84,6 +84,12 @@ G502_BUTTONS = (
     "xbutton2",
     "hscroll_left",
     "hscroll_right",
+    # Runtime MouseButtonSpy (0x8110); shown always so the interactive
+    # layout can place dots before spy arms on connect.
+    "sniper",
+    "dpi_switch",
+    "dpi_up",
+    "dpi_down",
 )
 
 # M650 Signature family: no horizontal scroll, no mode-shift, no dedicated gesture button.
@@ -144,6 +150,7 @@ def _layout(
     hotspots: list[dict[str, object]],
     *,
     manual_selectable: bool = False,
+    note: str = "",
 ) -> dict[str, object]:
     return {
         "key": key,
@@ -153,7 +160,7 @@ def _layout(
         "image_height": image_height,
         "interactive": True,
         "manual_selectable": manual_selectable,
-        "note": "",
+        "note": note,
         "hotspots": hotspots,
     }
 
@@ -351,7 +358,7 @@ LOGI_DEVICE_SPECS = (
             "G502 HERO SE",
         ),
         "ui_layout": "g502",
-        "image_asset": "icons/mouse-simple.svg",
+        "image_asset": "logitech-mice/g502/mouse.png",
         "supported_buttons": G502_BUTTONS,
         "gesture_cids": (),
         "connect_without_reprog": True,
@@ -367,7 +374,7 @@ LOGI_DEVICE_SPECS = (
             "G502 Lightspeed Gaming Mouse",
         ),
         "ui_layout": "g502",
-        "image_asset": "icons/mouse-simple.svg",
+        "image_asset": "logitech-mice/g502/mouse.png",
         "supported_buttons": G502_BUTTONS,
         "gesture_cids": (),
         "connect_without_reprog": True,
@@ -384,7 +391,7 @@ LOGI_DEVICE_SPECS = (
             "G502 X PLUS",
         ),
         "ui_layout": "g502",
-        "image_asset": "icons/mouse-simple.svg",
+        "image_asset": "logitech-mice/g502/mouse.png",
         "supported_buttons": G502_BUTTONS,
         "gesture_cids": (),
         "connect_without_reprog": True,
@@ -402,7 +409,7 @@ LOGI_DEVICE_SPECS = (
             "G502 Proteus Core",
         ),
         "ui_layout": "g502",
-        "image_asset": "icons/mouse-simple.svg",
+        "image_asset": "logitech-mice/g502/mouse.png",
         "supported_buttons": G502_BUTTONS,
         "gesture_cids": (),
         "connect_without_reprog": True,
@@ -496,26 +503,112 @@ LOGI_DEVICE_LAYOUTS = {
         ],
         manual_selectable=True,
     ),
-    # Shared placeholder for the G502 family: no device art has been
-    # contributed yet, so the page shows the generic silhouette with the
-    # G502 button list instead of an interactive hotspot diagram.
-    "g502": {
-        "key": "g502",
-        "label": "G502 family",
-        "image_asset": "icons/mouse-simple.svg",
-        "image_width": 220,
-        "image_height": 220,
-        "interactive": False,
-        # Manual-selectable so G502 owners whose device connects with an
-        # unrecognized PID/name (e.g. via a receiver) can still pick the
-        # right button set from the layout dropdown.
-        "manual_selectable": True,
-        "note": (
+    # Shared G502-family photo with remappable hotspots.
+    # Sniper + DPI-behind-wheel use MouseButtonSpy at runtime (no flash).
+    "g502": _layout(
+        "g502",
+        "G502 family",
+        "logitech-mice/g502/mouse.png",
+        600,
+        514,
+        [
+            _hotspot(
+                "middle",
+                "Middle button",
+                "mapping",
+                0.358,
+                0.082,
+                label_side="right",
+                label_off_x=175,
+                label_off_y=-40,
+            ),
+            _hotspot(
+                "hscroll_left",
+                "Scroll left",
+                "mapping",
+                0.325,
+                0.082,
+                label_side="left",
+                label_off_x=-140,
+                label_off_y=-50,
+            ),
+            _hotspot(
+                "hscroll_right",
+                "Scroll right",
+                "mapping",
+                0.392,
+                0.082,
+                label_side="right",
+                label_off_x=175,
+                label_off_y=40,
+            ),
+            _hotspot(
+                "dpi_switch",
+                "DPI switch",
+                "mapping",
+                0.425,
+                0.263,
+                label_side="right",
+                label_off_x=160,
+                label_off_y=70,
+            ),
+            _hotspot(
+                "dpi_up",
+                "DPI up",
+                "mapping",
+                0.130,
+                0.218,
+                label_side="left",
+                label_off_x=-130,
+                label_off_y=-55,
+            ),
+            _hotspot(
+                "dpi_down",
+                "DPI down",
+                "mapping",
+                0.153,
+                0.296,
+                label_side="left",
+                label_off_x=-130,
+                label_off_y=-10,
+            ),
+            _hotspot(
+                "sniper",
+                "Sniper button",
+                "mapping",
+                0.192,
+                0.471,
+                label_side="left",
+                label_off_x=-140,
+                label_off_y=10,
+            ),
+            _hotspot(
+                "xbutton2",
+                "Forward button",
+                "mapping",
+                0.283,
+                0.545,
+                label_side="left",
+                label_off_x=-150,
+                label_off_y=50,
+            ),
+            _hotspot(
+                "xbutton1",
+                "Back button",
+                "mapping",
+                0.383,
+                0.607,
+                label_side="left",
+                label_off_x=-155,
+                label_off_y=90,
+            ),
+        ],
+        manual_selectable=True,
+        note=(
             "OS-level remap for middle / back / forward / tilt. "
-            "Sniper + DPI use MouseButtonSpy (runtime divert; no flash)."
+            "Sniper + DPI buttons use MouseButtonSpy (runtime; no flash)."
         ),
-        "hotspots": [],
-    },
+    ),
     "mx_master_4": _layout(
         "mx_master_4",
         "MX Master 4",

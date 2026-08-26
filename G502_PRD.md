@@ -40,7 +40,8 @@ Non-goal: replace G HUB for RGB, onboard profile editors, or full flash programm
 | MouseButtonSpy (0x8110) sniper + DPI switch remap | Shipped (Phase C) |
 | Spy reapply after sleep / reboot | Shipped (Phase C) |
 | Report rate (0x8060) Host-gated | Shipped (Phase D.1) |
-| Onboard profiles read-only dump (no flash writes) | Shipped (Phase C) |
+| Onboard profiles read-only dump + Scroll UI | Shipped (Phase D.2) |
+| Interactive G502 layout (photo + hotspot dots) | Shipped |
 
 Acceptance already met: device dump shows `adjustable_dpi: true` and non-empty HID++ features; DPI slider changes feel; VHF stub no longer claims connect.
 

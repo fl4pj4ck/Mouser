@@ -446,6 +446,8 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         buttons = listener.connected_device.supported_buttons
         self.assertIn("sniper", buttons)
         self.assertIn("dpi_switch", buttons)
+        self.assertIn("dpi_up", buttons)
+        self.assertIn("dpi_down", buttons)
         self.assertIn("middle", buttons)
         dump = listener.dump_device_info()
         self.assertTrue(dump["mouse_button_spy"]["supported"])
@@ -517,7 +519,7 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         self.assertEqual(calls, [(0x07, 3, [0x00, 0x09, 0x60])])
 
     def test_spy_notification_emits_sniper_and_dpi_switch(self):
-        """G502 X Lightspeed measured map: sniper=bit4, dpi=bit8."""
+        """G502 X Lightspeed: sniper=4, dpi_switch=8, dpi_down=9, dpi_up=10."""
         events = []
         listener = hid_gesture.HidGestureListener(
             on_spy_button=lambda key, down: events.append((key, down))
@@ -525,9 +527,8 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         listener._mouse_button_spy_idx = 0x0C
         listener._feat_idx = None
 
-        # Bit 4 sniper (0x0010) + bit 8 dpi_switch (0x0100).
-        listener._handle_spy_notification([0x01, 0x10])
-        # Release all.
+        # Bits 4+8+9+10: 0x0010|0x0100|0x0200|0x0400 = 0x0710
+        listener._handle_spy_notification([0x07, 0x10])
         listener._handle_spy_notification([0x00, 0x00])
 
         self.assertEqual(
@@ -535,8 +536,12 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
             [
                 ("sniper", True),
                 ("dpi_switch", True),
+                ("dpi_down", True),
+                ("dpi_up", True),
                 ("sniper", False),
                 ("dpi_switch", False),
+                ("dpi_down", False),
+                ("dpi_up", False),
             ],
         )
 
@@ -787,11 +792,15 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         self.assertEqual(listener._spy_remap_original, original)
         self.assertEqual(listener._spy_remap_patched[4], 0)
         self.assertEqual(listener._spy_remap_patched[8], 0)
+        self.assertEqual(listener._spy_remap_patched[9], 0)
+        self.assertEqual(listener._spy_remap_patched[10], 0)
         set_calls = [c for c in calls if c[0] == 0x0C and c[1] == 4]
         self.assertEqual(len(set_calls), 1)
         patched = set_calls[0][2]
         self.assertEqual(patched[4], 0)  # sniper (G502 X bit 4)
         self.assertEqual(patched[8], 0)  # dpi_switch
+        self.assertEqual(patched[9], 0)  # dpi_down
+        self.assertEqual(patched[10], 0)  # dpi_up
         self.assertEqual(patched[0], 1)  # left untouched
         self.assertEqual(patched[5], 6)  # forward slot not zeroed
         self.assertTrue(any(c[1] == 1 and c[2] == [] for c in calls))

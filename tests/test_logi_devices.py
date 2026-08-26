@@ -333,7 +333,7 @@ class LogiDeviceRegistryTests(unittest.TestCase):
         self.assertIsNotNone(device)
         self.assertEqual(device.key, "g502")
 
-    def test_g502_buttons_are_os_level_only(self):
+    def test_g502_buttons_include_spy_remaps(self):
         buttons = get_buttons_for_layout("g502")
 
         self.assertIn("middle", buttons)
@@ -341,11 +341,13 @@ class LogiDeviceRegistryTests(unittest.TestCase):
         self.assertIn("xbutton2", buttons)
         self.assertIn("hscroll_left", buttons)
         self.assertIn("hscroll_right", buttons)
-        # No REPROG_CONTROLS_V4 on G-series onboard-profile mice, so no
-        # HID++-gated buttons may be offered.
+        self.assertIn("sniper", buttons)
+        self.assertIn("dpi_switch", buttons)
+        self.assertIn("dpi_up", buttons)
+        self.assertIn("dpi_down", buttons)
+        # No REPROG_CONTROLS_V4 — gesture / mode_shift stay unavailable.
         self.assertNotIn("gesture", buttons)
         self.assertNotIn("mode_shift", buttons)
-        self.assertNotIn("dpi_switch", buttons)
 
     def test_g502_family_allows_connect_without_reprog(self):
         for product_id in (0xC08B, 0xC08D, 0xC098, 0xC095, 0xC07D):
@@ -356,12 +358,27 @@ class LogiDeviceRegistryTests(unittest.TestCase):
                 self.assertTrue(device.connect_without_reprog)
                 self.assertEqual(device.gesture_cids, ())
 
-    def test_g502_layout_is_placeholder_not_generic(self):
+    def test_g502_layout_is_interactive_with_hotspots(self):
         layout = get_device_layout("g502")
 
         self.assertEqual(layout["key"], "g502")
-        self.assertFalse(layout["interactive"])
-        self.assertEqual(layout["hotspots"], [])
+        self.assertTrue(layout["interactive"])
+        self.assertEqual(layout["image_asset"], "logitech-mice/g502/mouse.png")
+        keys = {h["buttonKey"] for h in layout["hotspots"]}
+        self.assertEqual(
+            keys,
+            {
+                "middle",
+                "hscroll_left",
+                "hscroll_right",
+                "dpi_switch",
+                "dpi_up",
+                "dpi_down",
+                "xbutton1",
+                "xbutton2",
+                "sniper",
+            },
+        )
         note = layout.get("note", "").lower()
         self.assertIn("os-level", note)
         self.assertIn("mousebuttonspy", note.replace(" ", ""))

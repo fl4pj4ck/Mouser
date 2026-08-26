@@ -43,6 +43,8 @@ BUTTON_NAMES = {
     "hscroll_right": "Horizontal scroll right",
     "mode_shift":    "Mode shift button",
     "dpi_switch":    "DPI switch button",
+    "dpi_up":        "DPI up button",
+    "dpi_down":      "DPI down button",
     "sniper":        "Sniper button",
     "actions_ring":  "Actions Ring",
     "thumb_button":  "Thumb button",
@@ -193,6 +195,8 @@ BUTTON_TO_EVENTS = {
     "hscroll_right":      ("hscroll_right",),
     "mode_shift":         ("mode_shift_down", "mode_shift_up"),
     "dpi_switch":         ("dpi_switch_down", "dpi_switch_up"),
+    "dpi_up":             ("dpi_up_down", "dpi_up_up"),
+    "dpi_down":           ("dpi_down_down", "dpi_down_up"),
     "sniper":             ("sniper_down", "sniper_up"),
     # Sense Panel ("Actions Ring", MX Master 4)
     "actions_ring":       ("sense_click",),

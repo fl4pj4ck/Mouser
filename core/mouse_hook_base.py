@@ -621,6 +621,18 @@ class BaseMouseHook:
             else:
                 self._on_hid_dpi_switch_up()
             return
+        if button_key == "dpi_up":
+            event = (
+                MouseEvent.DPI_UP_DOWN if is_down else MouseEvent.DPI_UP_UP
+            )
+            self._dispatch(MouseEvent(event))
+            return
+        if button_key == "dpi_down":
+            event = (
+                MouseEvent.DPI_DOWN_DOWN if is_down else MouseEvent.DPI_DOWN_UP
+            )
+            self._dispatch(MouseEvent(event))
+            return
         if button_key == "sniper":
             event = (
                 MouseEvent.SNIPER_DOWN if is_down else MouseEvent.SNIPER_UP
