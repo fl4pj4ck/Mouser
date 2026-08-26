@@ -72,13 +72,12 @@ MX_ANYWHERE_SMARTSHIFT_BUTTONS = (
 
 # G502 family (G-series gaming mice). These run onboard profiles and do not
 # expose REPROG_CONTROLS_V4 (0x1B04), so HID++ button diversion -- gesture,
-# mode_shift, dpi_switch -- is unavailable. The buttons below are the ones the
-# firmware emits as standard OS events in its default profile: middle click,
-# back/forward side buttons, and wheel tilt left/right. The DPI up/down and
-# sniper buttons are consumed onboard and never reach the OS. ADJUSTABLE_DPI
-# (0x2201) is exposed and live setSensorDpi works without Host mode.
+# mode_shift -- is unavailable via REPROG. OS remaps cover middle / back /
+# forward / tilt. Sniper + DPI-behind-wheel remaps use MouseButtonSpy (0x8110)
+# at runtime. ADJUSTABLE_DPI (0x2201) live setSensorDpi works without Host mode.
 # ONBOARD_PROFILES Host mode (0x8100) is optional and risky on this path
 # (can reset LEDs / drop the link); never switch Host on every DPI write.
+# Report rate (0x8060) writes need Host — gate on the same opt-in.
 G502_BUTTONS = (
     "middle",
     "xbutton1",

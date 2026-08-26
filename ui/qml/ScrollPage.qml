@@ -341,6 +341,65 @@ Item {
                             }
                         }
                     }
+
+                    Rectangle {
+                        width: parent.width
+                        height: reportRateRow.implicitHeight + 20
+                        radius: 10
+                        color: scrollPage.theme.bgSubtle
+                        visible: backend.reportRateSupported
+
+                        RowLayout {
+                            id: reportRateRow
+                            anchors {
+                                fill: parent
+                                leftMargin: 14
+                                rightMargin: 14
+                                topMargin: 10
+                                bottomMargin: 10
+                            }
+                            spacing: 12
+
+                            Column {
+                                Layout.fillWidth: true
+                                spacing: 3
+
+                                Text {
+                                    text: s["scroll.report_rate"]
+                                    font {
+                                        family: uiState.fontFamily
+                                        pixelSize: 13
+                                    }
+                                    color: scrollPage.theme.textPrimary
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: backend.preferHostModeForDpi
+                                          ? s["scroll.report_rate_desc"]
+                                          : s["scroll.report_rate_need_host"]
+                                    font {
+                                        family: uiState.fontFamily
+                                        pixelSize: 11
+                                    }
+                                    color: scrollPage.theme.textSecondary
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            ComboBox {
+                                model: backend.reportRateChoices
+                                enabled: backend.preferHostModeForDpi
+                                currentIndex: {
+                                    var hz = backend.reportRateHz
+                                    var i = model.indexOf(hz)
+                                    return i >= 0 ? i : 0
+                                }
+                                onActivated: backend.setReportRateHz(model[index])
+                                Layout.preferredWidth: 110
+                            }
+                        }
+                    }
                 }
             }
 

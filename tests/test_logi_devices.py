@@ -366,7 +366,7 @@ class LogiDeviceRegistryTests(unittest.TestCase):
         self.assertIn("os-level", note)
         self.assertIn("mousebuttonspy", note.replace(" ", ""))
         self.assertIn("sniper", note)
-        self.assertIn("reprog", note)
+        self.assertIn("runtime", note)
 
     def test_build_g502_hero_connected_info(self):
         info = build_connected_device_info(

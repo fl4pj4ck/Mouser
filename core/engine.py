@@ -1237,8 +1237,17 @@ class Engine:
                     except Exception:
                         pass
             else:
-                failed.append("DPI")
                 retry_dpi = True
+
+        saved_rate = settings.get("report_rate_hz")
+        if (
+            saved_rate is not None
+            and prefer_host
+            and getattr(hg, "report_rate_supported", False)
+            and hasattr(hg, "set_report_rate")
+        ):
+            if not hg.set_report_rate(int(saved_rate)):
+                failed.append("report rate")
 
         if saved_ss and getattr(hg, "smart_shift_supported", False):
             if "Smart Shift" in failed:
@@ -1522,6 +1531,37 @@ class Engine:
             return hg.set_dpi(dpi)
         print("[Engine] No HID++ connection — DPI not applied")
         return False
+
+    def set_report_rate(self, hz):
+        """Persist and apply report rate (Host opt-in required on G502)."""
+        hz = int(hz)
+        self.cfg.setdefault("settings", {})["report_rate_hz"] = hz
+        save_config(self.cfg)
+        hg = self.hook._hid_gesture
+        if hg is None:
+            print("[Engine] No HID++ connection — report rate not applied")
+            return False
+        return hg.set_report_rate(hz)
+
+    @property
+    def report_rate_supported(self):
+        hg = getattr(self.hook, "_hid_gesture", None)
+        return bool(getattr(hg, "report_rate_supported", False))
+
+    @property
+    def report_rate_hz(self):
+        hg = getattr(self.hook, "_hid_gesture", None)
+        live = getattr(hg, "_report_rate_hz", None)
+        if live is not None:
+            return int(live)
+        saved = self.cfg.get("settings", {}).get("report_rate_hz")
+        return int(saved) if saved is not None else 0
+
+    @property
+    def report_rate_choices(self):
+        hg = getattr(self.hook, "_hid_gesture", None)
+        choices = list(getattr(hg, "_report_rate_hz_list", None) or [])
+        return choices
 
     def set_smart_shift(self, mode, smart_shift_enabled=False, threshold=25, scroll_force=50):
         """Send Smart Shift settings to device.

@@ -863,6 +863,34 @@ class Backend(QObject):
         hg = getattr(getattr(self._engine, "hook", None), "_hid_gesture", None)
         return bool(getattr(hg, "os_level_connect", False))
 
+    @Property(bool, notify=hidFeaturesReadyChanged)
+    def reportRateSupported(self):
+        return bool(
+            self._engine and getattr(self._engine, "report_rate_supported", False)
+        )
+
+    @Property(int, notify=settingsChanged)
+    def reportRateHz(self):
+        if self._engine:
+            return int(getattr(self._engine, "report_rate_hz", 0) or 0)
+        saved = self._cfg.get("settings", {}).get("report_rate_hz")
+        return int(saved) if saved is not None else 0
+
+    @Property(list, notify=hidFeaturesReadyChanged)
+    def reportRateChoices(self):
+        if self._engine:
+            return list(getattr(self._engine, "report_rate_choices", []) or [])
+        return []
+
+    @Slot(int)
+    def setReportRateHz(self, hz):
+        hz = int(hz)
+        self._cfg.setdefault("settings", {})["report_rate_hz"] = hz
+        save_config(self._cfg)
+        self.settingsChanged.emit()
+        if self._engine:
+            self._engine.set_report_rate(hz)
+
     @Property(int, notify=settingsChanged)
     def gestureThreshold(self):
         return int(self._cfg.get("settings", {}).get("gesture_threshold", 50))

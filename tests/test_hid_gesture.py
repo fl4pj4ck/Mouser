@@ -796,6 +796,74 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         self.assertEqual(patched[5], 6)  # forward slot not zeroed
         self.assertTrue(any(c[1] == 1 and c[2] == [] for c in calls))
 
+    def test_report_rate_probe_lists_supported_hz(self):
+        """0x8060 fn0 bitfield → Hz list; fn1 current interval."""
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener._dev_idx = 0x01
+
+        def fake_find_feature(feature_id, timeout_ms=None):
+            if feature_id == hid_gesture.FEAT_REPORT_RATE:
+                return 0x0D
+            return None
+
+        def fake_request(feat, func, params, timeout_ms=2000, count_timeout=True):
+            if feat == 0x0D and func == 0:
+                # bits 0,1,3,7 → 1/2/4/8 ms → 1000/500/250/125 Hz
+                return (0x11, 0x0D, 0x0, 0xA, [0x8B])
+            if feat == 0x0D and func == 1:
+                return (0x11, 0x0D, 0x1, 0xA, [0x01])  # 1 ms = 1000 Hz
+            return None
+
+        with (
+            patch.object(listener, "_find_feature", side_effect=fake_find_feature),
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(listener._probe_report_rate(), 0x0D)
+
+        self.assertTrue(listener.report_rate_supported)
+        self.assertEqual(listener._report_rate_hz_list, [1000, 500, 250, 125])
+        self.assertEqual(listener._report_rate_hz, 1000)
+
+    def test_report_rate_set_requires_host_opt_in(self):
+        """Refuse 0x8060 writes unless Host opt-in is already enabled."""
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener._dev_idx = 0x01
+        listener._report_rate_idx = 0x0D
+        listener._report_rate_hz_list = [1000, 500, 250, 125]
+        listener.set_prefer_host_mode(False)
+        calls = []
+
+        def fake_request(feat, func, params, timeout_ms=2000, count_timeout=True):
+            calls.append((feat, func, list(params)))
+            return (0x11, feat, func, 0xA, [0x00])
+
+        with (
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch("builtins.print"),
+        ):
+            listener._pending_report_rate = 500
+            listener._apply_pending_report_rate()
+
+        self.assertFalse(listener._report_rate_result)
+        self.assertEqual(calls, [])
+
+        listener.set_prefer_host_mode(True)
+        listener._host_mode_applied = True
+        with (
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch.object(listener, "_apply_host_mode_once", return_value=True),
+            patch("builtins.print"),
+        ):
+            listener._pending_report_rate = 500
+            listener._apply_pending_report_rate()
+
+        self.assertTrue(listener._report_rate_result)
+        self.assertEqual(calls, [(0x0D, 2, [0x02])])  # 2 ms = 500 Hz
+        self.assertEqual(listener._report_rate_hz, 500)
+
     def test_host_mode_switch_once_when_prefer_enabled(self):
         """Opt-in Host mode uses 0x8100 once; never via setSensorDpi."""
         listener = hid_gesture.HidGestureListener()

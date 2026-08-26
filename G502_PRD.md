@@ -38,6 +38,8 @@ Non-goal: replace G HUB for RGB, onboard profile editors, or full flash programm
 | Reconnect DPI replay: short settle + verify for OS-level | Shipped (Phase B) |
 | Opt-in Host mode for DPI persistence (default off) | Shipped (Phase B) |
 | MouseButtonSpy (0x8110) sniper + DPI switch remap | Shipped (Phase C) |
+| Spy reapply after sleep / reboot | Shipped (Phase C) |
+| Report rate (0x8060) Host-gated | Shipped (Phase D.1) |
 | Onboard profiles read-only dump (no flash writes) | Shipped (Phase C) |
 
 Acceptance already met: device dump shows `adjustable_dpi: true` and non-empty HID++ features; DPI slider changes feel; VHF stub no longer claims connect.
@@ -230,15 +232,15 @@ Discover at connect; expose slider only if feature index found; same “no Host 
 2. Spike read-only onboard profile dump (`0x8100`) — **done** (read-only)
 3. Decide: spy path vs profile rewrite vs document as unsupported — **spy path**
 4. Implement chosen path + tests — **done** (G502 X map: sniper=bit4, DPI=bit8)
-5. Reapply spy remapping after sleep / `0x41` link-up — **in progress**
+5. Reapply spy remapping after sleep / `0x41` link-up — **done** (hw: survives reboot)
 
 **Exit:** Q2 remappable via runtime MouseButtonSpy (no flash).
 
 ### Phase D — Stretch / hardening
 
-1. Report rate (Q6)
-2. Optional profile DPI stage editor (full Solaar-like)
-3. Verify spy remaps survive sleep/wake on hardware after reapply
+1. Report rate (Q6) — **done**: discover `0x8060`; write only when Host opt-in on
+2. Optional profile DPI stage editor (full Solaar-like) — still out of v1 flash policy
+3. ~~Verify spy remaps survive sleep/wake~~ — **done**
 
 ---
 

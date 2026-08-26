@@ -1058,6 +1058,7 @@ FEAT_HAPTIC         = 0x19B0      # Haptic Feedback (MX Master 4)
 FEAT_FORCE_SENSING  = 0x19C0      # Force Sensing Button (MX Master 4)
 FEAT_ONBOARD_PROFILES = 0x8100    # Onboard Profiles / Host vs Onboard mode
 FEAT_MOUSE_BUTTON_SPY = 0x8110    # Mouse Button Spy (G502 sniper / DPI±)
+FEAT_REPORT_RATE = 0x8060         # Adjustable report rate (ms interval)
 
 # ONBOARD_PROFILES mode bytes (Solaar OnboardMode). Host can make software
 # DPI stickier across wake, but has reset LEDs / link on some G502 paths.
@@ -1272,6 +1273,12 @@ class HidGestureListener:
         self._dpi_idx   = None          # feature index of ADJUSTABLE_DPI
         self._onboard_profiles_idx = None  # feature index of ONBOARD_PROFILES
         self._mouse_button_spy_idx = None  # feature index of MOUSE_BUTTON_SPY
+        self._report_rate_idx = None       # feature index of REPORT_RATE
+        self._report_rate_hz = None
+        self._report_rate_hz_list = []
+        self._pending_report_rate = None
+        self._report_rate_result = None
+        self._report_rate_event = threading.Event()
         self._spy_button_count = None
         self._spy_bitmap = 0
         self._spy_held = {button: False for _bit, button in G502_SPY_BIT_BUTTONS}
@@ -1478,6 +1485,11 @@ class HidGestureListener:
                 "feature_id": FEAT_MOUSE_BUTTON_SPY,
                 "index": self._mouse_button_spy_idx,
             })
+        if self._report_rate_idx is not None:
+            features.append({
+                "feature_id": FEAT_REPORT_RATE,
+                "index": self._report_rate_idx,
+            })
         if self._smart_shift_idx is not None:
             features.append({
                 "feature_id": (
@@ -1538,6 +1550,12 @@ class HidGestureListener:
                 f"index 0x{self._mouse_button_spy_idx:02X} "
                 f"buttons={self._spy_button_count if self._spy_button_count is not None else '?'}"
             )
+        if self._report_rate_idx is not None:
+            features["REPORT_RATE (0x8060)"] = (
+                f"index 0x{self._report_rate_idx:02X} "
+                f"hz={self._report_rate_hz} "
+                f"supported={self._report_rate_hz_list}"
+            )
         for feature_id, index in sorted(self._wheel_feature_indexes.items()):
             features[f"WHEEL (0x{feature_id:04X})"] = f"index 0x{index:02X}"
         if self._hires_wheel_idx is not None:
@@ -1591,6 +1609,12 @@ class HidGestureListener:
                 "mode": self._onboard_mode,
                 "descriptors": self._onboard_desc,
                 "writes_enabled": False,
+            },
+            "report_rate": {
+                "supported": self._report_rate_idx is not None,
+                "hz": self._report_rate_hz,
+                "supported_hz": list(self._report_rate_hz_list),
+                "writes_need_host_opt_in": True,
             },
         }
 
@@ -2375,6 +2399,115 @@ class HidGestureListener:
     def dpi_supported(self):
         """True when ADJUSTABLE_DPI (0x2201) was resolved on this connection."""
         return self._dpi_idx is not None
+
+    @property
+    def report_rate_supported(self):
+        return self._report_rate_idx is not None
+
+    @staticmethod
+    def _report_hz_from_ms(ms):
+        if ms is None or int(ms) <= 0:
+            return None
+        return 1000 // int(ms)
+
+    @staticmethod
+    def _report_ms_from_hz(hz):
+        if hz is None or int(hz) <= 0:
+            return None
+        return max(1, min(8, 1000 // int(hz)))
+
+    def _probe_report_rate(self, timeout_ms=800):
+        """Discover 0x8060, list supported Hz, read current rate."""
+        if self._report_rate_idx is not None:
+            return self._report_rate_idx
+        fi = self._find_feature(FEAT_REPORT_RATE, timeout_ms=timeout_ms)
+        if fi is None:
+            return None
+        self._report_rate_idx = fi
+
+        # fn0 = supported intervals bitfield (bit n = n+1 ms).
+        supp = self._request(
+            fi, 0, [], timeout_ms=timeout_ms, count_timeout=False
+        )
+        hz_list = []
+        if supp and supp[4]:
+            bits = int(supp[4][0])
+            for bit in range(8):
+                if bits & (1 << bit):
+                    hz_list.append(1000 // (bit + 1))
+        self._report_rate_hz_list = hz_list
+
+        cur = self._request(
+            fi, 1, [], timeout_ms=timeout_ms, count_timeout=False
+        )
+        if cur and cur[4]:
+            self._report_rate_hz = self._report_hz_from_ms(cur[4][0])
+        print(
+            f"[HidGesture] REPORT_RATE @0x{fi:02X} "
+            f"hz={self._report_rate_hz} supported={hz_list}"
+        )
+        return fi
+
+    def set_report_rate(self, hz):
+        """Queue report-rate write (Host opt-in required). Any-thread safe."""
+        self._report_rate_result = None
+        self._report_rate_event.clear()
+        self._pending_report_rate = int(hz)
+        if not self._report_rate_event.wait(5.0):
+            print("[HidGesture] Report rate set timed out")
+            self._pending_report_rate = None
+            return False
+        return self._report_rate_result is True
+
+    def _apply_pending_report_rate(self):
+        """Listener-thread: set 0x8060 only when Host opt-in is on."""
+        hz = self._pending_report_rate
+        if hz is None:
+            return
+        if not self._prefer_host_mode:
+            print("[HidGesture] Report rate set blocked — Host opt-in off")
+            self._report_rate_result = False
+            self._pending_report_rate = None
+            self._report_rate_event.set()
+            return
+        if self._report_rate_idx is None or self._dev is None:
+            print("[HidGesture] Cannot set report rate — not connected")
+            self._report_rate_result = False
+            self._pending_report_rate = None
+            self._report_rate_event.set()
+            return
+        if not self._apply_host_mode_once():
+            print("[HidGesture] Report rate set FAILED — Host mode")
+            self._report_rate_result = False
+            self._pending_report_rate = None
+            self._report_rate_event.set()
+            return
+
+        ms = self._report_ms_from_hz(hz)
+        if ms is None:
+            self._report_rate_result = False
+            self._pending_report_rate = None
+            self._report_rate_event.set()
+            return
+        # fn2 setReportRate(interval_ms)
+        resp = self._request(
+            self._report_rate_idx,
+            2,
+            [ms],
+            timeout_ms=800,
+            count_timeout=False,
+        )
+        if not resp:
+            print("[HidGesture] Report rate set FAILED")
+            self._report_rate_result = False
+            self._pending_report_rate = None
+            self._report_rate_event.set()
+            return
+        self._report_rate_hz = self._report_hz_from_ms(ms)
+        print(f"[HidGesture] Report rate set to {self._report_rate_hz} Hz")
+        self._report_rate_result = True
+        self._pending_report_rate = None
+        self._report_rate_event.set()
 
     @property
     def os_level_connect(self):
@@ -3352,6 +3485,9 @@ class HidGestureListener:
         self._pending_dpi = None
         self._dpi_result = None
         self._dpi_event.set()
+        self._pending_report_rate = None
+        self._report_rate_result = None
+        self._report_rate_event.set()
         self._pending_host_mode = False
         self._host_mode_result = None
         self._host_mode_event.set()
@@ -3636,6 +3772,10 @@ class HidGestureListener:
             self._spy_remap_patched = None
             self._spy_started = False
             self._pending_spy_reapply = False
+            self._report_rate_idx = None
+            self._report_rate_hz = None
+            self._report_rate_hz_list = []
+            self._pending_report_rate = None
             self._onboard_mode = None
             self._onboard_desc = None
             self._rawxy_enabled = False
@@ -4071,6 +4211,7 @@ class HidGestureListener:
                     # sniper / DPI notify; expose them in supported_buttons.
                     self._probe_mouse_button_spy(timeout_ms=800)
                     self._probe_onboard_profiles_readonly(timeout_ms=800)
+                    self._probe_report_rate(timeout_ms=800)
                     if self._mouse_button_spy_idx is not None:
                         base = self._connected_device_info.supported_buttons
                         merged = tuple(
@@ -4243,6 +4384,9 @@ class HidGestureListener:
                     if self._pending_spy_reapply:
                         self._apply_pending_spy_reapply()
 
+                    if self._pending_report_rate is not None:
+                        self._apply_pending_report_rate()
+
                     # Apply any queued DPI command
                     if self._pending_dpi is not None:
                         if self._pending_dpi == "read":
@@ -4314,6 +4458,10 @@ class HidGestureListener:
             self._spy_remap_patched = None
             self._spy_started = False
             self._pending_spy_reapply = False
+            self._report_rate_idx = None
+            self._report_rate_hz = None
+            self._report_rate_hz_list = []
+            self._pending_report_rate = None
             self._onboard_mode = None
             self._onboard_desc = None
             if self._held:
