@@ -363,9 +363,10 @@ class LogiDeviceRegistryTests(unittest.TestCase):
         self.assertFalse(layout["interactive"])
         self.assertEqual(layout["hotspots"], [])
         note = layout.get("note", "").lower()
-        self.assertIn("onboard", note)
-        self.assertIn("gesture", note)
-        self.assertIn("mode shift", note)
+        self.assertIn("os-level", note)
+        self.assertIn("mousebuttonspy", note.replace(" ", ""))
+        self.assertIn("sniper", note)
+        self.assertIn("reprog", note)
 
     def test_build_g502_hero_connected_info(self):
         info = build_connected_device_info(

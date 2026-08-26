@@ -313,7 +313,7 @@ For project layout, the architecture diagram, the HID++ gesture detector, the En
 
 ## Limitations
 
-- **G502 family is OS-level only** — these mice have no `REPROG_CONTROLS_V4`, so Mouser connects without HID++ button divert. Remap middle / back / forward / wheel tilt; DPI up/down and sniper stay onboard.
+- **G502 family is OS-level only** — these mice have no `REPROG_CONTROLS_V4`, so Mouser connects without HID++ button divert. Remap middle / back / forward / wheel tilt; when MouseButtonSpy (`0x8110`) is present, sniper and the DPI button are remappable too. Onboard profile flash editing is out of scope.
 - **Per-device mappings aren't fully separated yet** — layout overrides are stored per detected device, but profile mappings are still global.
 - **Conflicts with Logitech Options+** — both apps fight over HID++ access. Quit Options+ before running Mouser.
 - **Scroll inversion** uses coalesced post-injection on Windows to avoid LL-hook deadlocks; it's stable in mainstream apps but may misbehave in some games or low-level drivers.

@@ -512,9 +512,8 @@ LOGI_DEVICE_LAYOUTS = {
         # right button set from the layout dropdown.
         "manual_selectable": True,
         "note": (
-            "G502 remaps middle / back / forward / wheel tilt at the OS level. "
-            "Gesture, mode shift, and DPI switch need REPROG_V4 (not on this "
-            "mouse). DPI up/down and sniper stay onboard-only."
+            "OS-level remap for middle / back / forward / tilt. "
+            "Sniper + DPI use MouseButtonSpy (runtime divert; no flash)."
         ),
         "hotspots": [],
     },
