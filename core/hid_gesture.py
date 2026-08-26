@@ -834,6 +834,61 @@ def _summarize_hid_infos(infos, limit=8):
     return "; ".join(parts) if parts else "-"
 
 
+def _hid_path_text(info):
+    path = info.get("path")
+    if path is None:
+        return ""
+    if isinstance(path, bytes):
+        return path.decode("utf-8", errors="replace")
+    return str(path)
+
+
+def _is_windows_vhf_stub(info):
+    """Windows Virtual HID Framework stubs are not HID++ endpoints.
+
+    They often re-advertise a Lightspeed WPID (e.g. 0x4099) with product
+    string "HID VHF Driver" and usage page 0x0059. Opening them yields a
+    fake "connected" G502 with zero discovered features — DPI cannot work.
+    """
+    product = (info.get("product_string") or "").strip().lower()
+    if "vhf" in product:
+        return True
+    path = _hid_path_text(info).lower()
+    if "hid_device_system_vhf" in path or "#vhf" in path:
+        return True
+    return False
+
+
+def _allow_known_device_fallback(info):
+    """Fallback open only when vendor usage metadata is missing.
+
+    Concrete non-vendor pages (mouse/keyboard/VHF) are real HID collections
+    that do not speak HID++. WPIDs 0x4xxx belong behind a receiver PID.
+    """
+    if _is_windows_vhf_stub(info):
+        return False
+    usage_page = int(info.get("usage_page", 0) or 0)
+    if usage_page != 0:
+        return False
+    pid = int(info.get("product_id", 0) or 0)
+    # Wireless PIDs are not USB HID++ interfaces; use the receiver instead.
+    if 0x4000 <= pid <= 0x4FFF:
+        return False
+    product = info.get("product_string")
+    return resolve_device(product_id=pid, product_name=product) is not None
+
+
+def _candidate_probe_priority(info):
+    """Prefer vendor HID++ interfaces / receivers over WPID stubs."""
+    pid = int(info.get("product_id", 0) or 0)
+    usage_page = int(info.get("usage_page", 0) or 0)
+    vendor = 0 if usage_page >= 0xFF00 else 1
+    # Lightspeed 0xC547 / Bolt 0xC548 (constants defined below).
+    receiver = 0 if pid in (0xC547, 0xC548) else 1
+    wpid = 1 if 0x4000 <= pid <= 0x4FFF else 0
+    return (vendor, receiver, wpid, pid)
+
+
 def _linux_logitech_hidraw_nodes(base="/sys/class/hidraw"):
     if not sys.platform.startswith("linux"):
         return []
@@ -882,6 +937,8 @@ BT_DEV_IDX     = 0xFF        # device-index for direct Bluetooth
 # Known Logi Bolt receiver PID.
 # Source: https://github.com/pwr-Solaar/Solaar/blob/master/lib/logitech_receiver/base_usb.py
 BOLT_RECEIVER_PID = 0xC548
+# G502 X / Lightspeed gaming receiver (USB dongle PID, not the mouse WPID).
+LIGHTSPEED_RECEIVER_PID = 0xC547
 FEAT_IROOT     = 0x0000
 FEAT_REPROG_V4 = 0x1B04      # Reprogrammable Controls V4
 FEAT_ADJ_DPI   = 0x2201      # Adjustable DPI
@@ -1390,7 +1447,7 @@ class HidGestureListener:
                         add_info(dict(info, source="hidapi-enumerate"))
                         hidapi_candidates += 1
                         continue
-                    if resolve_device(product_id=pid, product_name=product):
+                    if _allow_known_device_fallback(info):
                         print(
                             "[HidGesture] Accepting known Logitech device "
                             "without vendor usage metadata for fallback probe "
@@ -1399,6 +1456,15 @@ class HidGestureListener:
                         )
                         add_info(dict(info, source="hidapi-enumerate-fallback"))
                         fallback_candidates += 1
+                    elif _is_windows_vhf_stub(info) or (
+                        0x4000 <= pid <= 0x4FFF and usage_page < 0xFF00
+                    ):
+                        print(
+                            "[HidGesture] Skipping non-HID++ interface "
+                            f"PID=0x{pid:04X} UP=0x{usage_page:04X} "
+                            f"product={product or '?'} "
+                            f"path={_hid_path_text(info) or '-'}"
+                        )
                 if raw_infos and not (hidapi_candidates or fallback_candidates):
                     print(
                         "[HidGesture] hidapi found Logitech interfaces, but none "
@@ -1448,8 +1514,13 @@ class HidGestureListener:
         d = dev.read(64, timeout_ms)
         return list(d) if d else None
 
-    def _request(self, feat, func, params, timeout_ms=2000):
-        """Send a long HID++ request, wait for matching response."""
+    def _request(self, feat, func, params, timeout_ms=2000, *, count_timeout=True):
+        """Send a long HID++ request, wait for matching response.
+
+        ``count_timeout=False`` keeps optional probes (e.g. onboard Host
+        mode) from tripping the consecutive-timeout reconnect path that
+        marks the mouse disconnected in the UI.
+        """
         req_params = list(params)
         try:
             self._tx(LONG_ID, feat, func, req_params)
@@ -1496,10 +1567,12 @@ class HidGestureListener:
             # Forward non-matching reports (e.g. diverted button events) so
             # button held-state tracking stays in sync during command exchanges.
             self._on_report(raw)
-        self._consecutive_request_timeouts += 1
+        if count_timeout:
+            self._consecutive_request_timeouts += 1
         print(f"[HidGesture] request timeout feat=0x{feat:02X} func=0x{func:X} "
               f"devIdx=0x{self._dev_idx:02X} params=[{_hex_bytes(req_params)}] "
-              f"(consecutive={self._consecutive_request_timeouts})")
+              f"(consecutive={self._consecutive_request_timeouts}"
+              f"{'' if count_timeout else ', uncounted'})")
         return None
 
     # ── feature helpers ───────────────────────────────────────────
@@ -1892,6 +1965,63 @@ class HidGestureListener:
 
     # ── DPI control ───────────────────────────────────────────────
 
+    def _ensure_dpi_feature(self, timeout_ms=2000, idx_order=None):
+        """Resolve ADJUSTABLE_DPI, retrying device indexes when needed.
+
+        G502 OS-level connect often misses the feature on the tight 400 ms
+        probe. Re-query with a longer timeout before treating DPI as absent.
+        """
+        if self._dpi_idx is not None:
+            return self._dpi_idx
+        if self._dev is None:
+            return None
+
+        saved_idx = self._dev_idx
+        slots = []
+        seen = set()
+        for idx in (idx_order or ()):
+            if idx in seen:
+                continue
+            seen.add(idx)
+            slots.append(idx)
+        if saved_idx not in seen:
+            slots.insert(0, saved_idx)
+        if not slots:
+            slots = [saved_idx]
+
+        for idx in slots:
+            self._dev_idx = idx
+            fi = self._find_feature(FEAT_ADJ_DPI, timeout_ms=timeout_ms)
+            if fi is None:
+                continue
+            self._dpi_idx = fi
+            print(
+                f"[HidGesture] Found ADJUSTABLE_DPI @0x{fi:02X} "
+                f"(devIdx=0x{idx:02X})"
+            )
+            return fi
+
+        self._dev_idx = saved_idx
+        return None
+
+    def _read_sensor_dpi(self, *, count_timeout=True):
+        """getSensorDpi on the active ADJUSTABLE_DPI feature index."""
+        if self._dpi_idx is None or self._dev is None:
+            return None
+        resp = self._request(
+            self._dpi_idx, 2, [0x00], count_timeout=count_timeout
+        )
+        if not resp:
+            return None
+        _, _, _, _, p = resp
+        if not p or len(p) < 3:
+            return None
+        current = (p[1] << 8) | p[2]
+        # Spec: 0 means "use default DPI" carried in bytes 3-4.
+        if current == 0 and len(p) >= 5:
+            current = (p[3] << 8) | p[4]
+        return current
+
     def set_dpi(self, dpi_value):
         """Queue a DPI change -- will be applied on the listener thread.
         Can be called from any thread.  Returns True on success."""
@@ -1899,7 +2029,7 @@ class HidGestureListener:
         self._dpi_result = None
         self._dpi_event.clear()
         self._pending_dpi = dpi
-        if not self._dpi_event.wait(3.0):
+        if not self._dpi_event.wait(5.0):
             print("[HidGesture] DPI set timed out")
             self._pending_dpi = None
             return False
@@ -1910,25 +2040,30 @@ class HidGestureListener:
         dpi = self._pending_dpi
         if dpi is None:
             return
+        if self._dpi_idx is None:
+            self._ensure_dpi_feature(timeout_ms=2000)
         if self._dpi_idx is None or self._dev is None:
             print("[HidGesture] Cannot set DPI -- not connected")
             self._dpi_result = False
             self._pending_dpi = None
             self._dpi_event.set()
             return
+
         hi = (dpi >> 8) & 0xFF
         lo = dpi & 0xFF
         # setSensorDpi: function 3, params [sensorIdx=0, dpi_hi, dpi_lo]
-        # (function 2 = getSensorDpi, function 3 = setSensorDpi)
         resp = self._request(self._dpi_idx, 3, [0x00, hi, lo])
-        if resp:
-            _, _, _, _, p = resp
-            actual = (p[1] << 8 | p[2]) if len(p) >= 3 else dpi
-            print(f"[HidGesture] DPI set to {actual}")
-            self._dpi_result = True
-        else:
+        if not resp:
             print("[HidGesture] DPI set FAILED")
             self._dpi_result = False
+            self._pending_dpi = None
+            self._dpi_event.set()
+            return
+
+        _, _, _, _, p = resp
+        acked = (p[1] << 8 | p[2]) if len(p) >= 3 else dpi
+        print(f"[HidGesture] DPI set to {acked}")
+        self._dpi_result = True
         self._pending_dpi = None
         self._dpi_event.set()
 
@@ -1938,7 +2073,7 @@ class HidGestureListener:
         self._dpi_result = None
         self._dpi_event.clear()
         self._pending_dpi = "read"
-        if not self._dpi_event.wait(3.0):
+        if not self._dpi_event.wait(5.0):
             print("[HidGesture] DPI read timed out")
             self._pending_dpi = None
             return None
@@ -1946,21 +2081,19 @@ class HidGestureListener:
 
     def _apply_pending_read_dpi(self):
         """Called from the listener thread to read current DPI."""
+        if self._dpi_idx is None:
+            self._ensure_dpi_feature(timeout_ms=2000)
         if self._dpi_idx is None or self._dev is None:
             self._dpi_result = None
             self._pending_dpi = None
             self._dpi_event.set()
             return
-        # getSensorDpi: function 2, params [sensorIdx=0]
-        resp = self._request(self._dpi_idx, 2, [0x00])
-        if resp:
-            _, _, _, _, p = resp
-            current = (p[1] << 8 | p[2]) if len(p) >= 3 else None
+        current = self._read_sensor_dpi()
+        if current is not None:
             print(f"[HidGesture] Current DPI = {current}")
-            self._dpi_result = current
         else:
             print("[HidGesture] DPI read FAILED")
-            self._dpi_result = None
+        self._dpi_result = current
         self._pending_dpi = None
         self._dpi_event.set()
 
@@ -1977,6 +2110,19 @@ class HidGestureListener:
     @property
     def smart_shift_supported(self):
         return self._smart_shift_idx is not None
+
+    @property
+    def dpi_supported(self):
+        """True when ADJUSTABLE_DPI (0x2201) was resolved on this connection."""
+        return self._dpi_idx is not None
+
+    @property
+    def os_level_connect(self):
+        """True when connected without REPROG_V4 (e.g. G502 OS-level remap)."""
+        return (
+            self._connected_device_info is not None
+            and self._feat_idx is None
+        )
 
     @property
     def hires_wheel_supported(self):
@@ -2855,7 +3001,10 @@ class HidGestureListener:
 
         def _default_priority(info):
             name = (info.get("product_string") or "").lower()
-            return (1 if "receiver" in name else 0, name)
+            return _candidate_probe_priority(info) + (
+                1 if "receiver" in name else 0,
+                name,
+            )
 
         # Negate the score so higher match (cached interface) sorts first.
         def _priority(info):
@@ -3019,12 +3168,12 @@ class HidGestureListener:
 
             # Narrow the device-index search based on transport:
             #  - BT candidates only use BT_DEV_IDX (0xFF)
-            #  - Bolt receivers only use slots 1-6
+            #  - Bolt / Lightspeed receivers only use slots 1-6
             #  - Unknown: try all (BT first, then receiver slots)
             bt_opened = "bluetooth" in (opened_transport or "").lower()
             if bt_opened:
                 default_idx_order = (BT_DEV_IDX,)
-            elif pid == BOLT_RECEIVER_PID:
+            elif pid in (BOLT_RECEIVER_PID, LIGHTSPEED_RECEIVER_PID):
                 default_idx_order = (1, 2, 3, 4, 5, 6)
             else:
                 default_idx_order = (BT_DEV_IDX, 1, 2, 3, 4, 5, 6)
@@ -3270,6 +3419,126 @@ class HidGestureListener:
                         return True
                     continue     # divert failed -- try next receiver slot
             if not reprog_found:
+                # G502 and similar catalog devices have no REPROG_V4. Connect
+                # only when HID++ is actually alive (ADJUSTABLE_DPI found).
+                # Catalog PID alone on a Windows VHF stub used to claim
+                # "connected" with zero features — DPI then cannot work.
+                os_spec = device_spec
+                hidpp_name = None
+                may_os_connect = bool(
+                    (os_spec is not None and os_spec.connect_without_reprog)
+                    or int(pid or 0) in (
+                        LIGHTSPEED_RECEIVER_PID,
+                        BOLT_RECEIVER_PID,
+                    )
+                )
+                if may_os_connect:
+                    for idx in idx_order:
+                        self._dev_idx = idx
+                        dpi_fi = self._find_feature(FEAT_ADJ_DPI, timeout_ms=400)
+                        if dpi_fi is not None:
+                            self._dpi_idx = dpi_fi
+                            print(
+                                f"[HidGesture] Found ADJUSTABLE_DPI @0x{dpi_fi:02X}"
+                            )
+                        name = self._query_device_name()
+                        if name:
+                            hidpp_name = name
+                            print(f"[HidGesture] HID++ device name: '{hidpp_name}'")
+                            os_spec = resolve_device(
+                                product_id=pid, product_name=name,
+                            ) or os_spec
+                        if dpi_fi is not None:
+                            break
+
+                if self._dpi_idx is None and may_os_connect:
+                    self._ensure_dpi_feature(
+                        timeout_ms=2000, idx_order=idx_order
+                    )
+
+                if (
+                    os_spec is not None
+                    and os_spec.connect_without_reprog
+                    and self._dpi_idx is not None
+                ):
+                    print(
+                        "[HidGesture] OS-level connect without REPROG_V4 "
+                        f"PID=0x{int(pid or 0):04X} "
+                        f"name='{hidpp_name or product}' "
+                        f"dpiIdx=0x{self._dpi_idx:02X}"
+                    )
+                    batt_fi = self._find_feature(FEAT_UNIFIED_BATT, timeout_ms=400)
+                    if batt_fi:
+                        self._battery_idx = batt_fi
+                        self._battery_feature_id = FEAT_UNIFIED_BATT
+                    else:
+                        batt_fi = self._find_feature(
+                            FEAT_BATTERY_STATUS, timeout_ms=400
+                        )
+                        if batt_fi:
+                            self._battery_idx = batt_fi
+                            self._battery_feature_id = FEAT_BATTERY_STATUS
+                    if self._dev_idx == BT_DEV_IDX:
+                        actual_transport = "Bluetooth"
+                    elif int(pid or 0) == BOLT_RECEIVER_PID:
+                        actual_transport = "Logi Bolt"
+                    elif int(pid or 0) == LIGHTSPEED_RECEIVER_PID:
+                        actual_transport = "LIGHTSPEED"
+                    else:
+                        actual_transport = "USB Receiver"
+                    self._feat_idx = None
+                    self._last_controls = []
+                    self._gesture_candidates = []
+                    self._gesture_cid = DEFAULT_GESTURE_CID
+                    self._rawxy_enabled = False
+                    self._connected_device_info = build_connected_device_info(
+                        product_id=pid,
+                        product_name=hidpp_name or product,
+                        transport=actual_transport,
+                        source=source,
+                        gesture_cids=(),
+                        reprog_controls=[],
+                        active_gesture_cid=None,
+                        gesture_rawxy_enabled=False,
+                        discovered_features=self._discovered_feature_inventory(),
+                        device_identity={
+                            "device_index": self._dev_idx,
+                            "usage_page": opened_up,
+                            "usage": opened_usage,
+                            "backend": opened_transport or "hidapi",
+                            "hid_module": _HID_MODULE_NAME or "",
+                            "device_path": opened_path,
+                        },
+                        has_hires_wheel=False,
+                        has_thumbwheel=False,
+                        hires_wheel_active=False,
+                        thumbwheel_active=False,
+                        thumb_button_via_hid=False,
+                    )
+                    try:
+                        _save_last_device_cache(
+                            candidate=candidate_signature,
+                            device={
+                                "name": hidpp_name or product,
+                                "dev_idx": int(self._dev_idx),
+                                "transport": actual_transport,
+                                "feat_idx_reprog": None,
+                            },
+                        )
+                    except Exception as exc:
+                        print(f"[HidGesture] Cache write skipped: {exc}")
+                    self._reprog_absent_until.pop(cand_key, None)
+                    return True
+
+                if may_os_connect:
+                    print(
+                        "[HidGesture] Skipping OS-level connect — "
+                        "ADJUSTABLE_DPI not found "
+                        f"PID=0x{int(pid or 0):04X} UP=0x{opened_up:04X} "
+                        f"product={product or '?'} "
+                        "(need Lightspeed/vendor HID++ interface, not VHF stub)"
+                    )
+
                 print(
                     "[HidGesture] Opened candidate but REPROG_V4 was not found "
                     f"on tested devIdx values PID=0x{int(pid or 0):04X} "
@@ -3345,6 +3614,14 @@ class HidGestureListener:
                         raise IOError("reconnect requested")
 
                     if self._consecutive_request_timeouts >= _CONSECUTIVE_TIMEOUT_RECONNECT:
+                        # OS-level G502 sessions talk on the vendor HID++
+                        # interface; movement stays on the boot mouse
+                        # collection. Waiting for a wake report here leaves
+                        # the UI stuck on "not connected" for minutes.
+                        if self.os_level_connect:
+                            raise IOError(
+                                "os-level request timeouts — reconnect"
+                            )
                         if not _device_asleep:
                             _device_asleep = True
                             _device_sleep_time = time.monotonic()

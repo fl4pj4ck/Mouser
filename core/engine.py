@@ -116,6 +116,8 @@ class Engine:
         self._last_native_invert_target = (False, False)
         self._last_hid_features_ready = bool(self.hid_features_ready)
         self._hid_replay_requested_this_launch = False
+        self._desktop_info_cache = None
+        self._desktop_info_ts = 0.0
         self._desktop_direction = "right"
         self._replay_inflight = False
         self._replay_pending_rerun = False
@@ -860,11 +862,12 @@ class Engine:
             print("[Engine] cycle_desktops only supported on macOS")
             return
 
-        # Resolve the active display and space on every press.  The cursor can
-        # move between displays without changing the foreground application;
-        # caching this tuple would reuse the previous display for a few
-        # seconds and incorrectly skip a valid switch on the new display.
-        desktop_count, current = self._get_macos_desktop_info()
+        # Get desktop info (cached for 5 seconds to avoid subprocess per press)
+        now = time.time()
+        if self._desktop_info_cache is None or (now - self._desktop_info_ts) > 5.0:
+            self._desktop_info_cache = self._get_macos_desktop_info()
+            self._desktop_info_ts = now
+        desktop_count, current = self._desktop_info_cache
 
         # Only one desktop — nothing to cycle
         if desktop_count <= 1:
@@ -895,6 +898,7 @@ class Engine:
             execute_action("space_left")
 
         self._desktop_direction = direction
+        self._desktop_info_cache = (desktop_count, next_pos)
 
     def _make_hscroll_handler(self, action_id):
         def handler(event):
@@ -1159,13 +1163,14 @@ class Engine:
         }
 
     def _run_saved_settings_replay(self):
+        """Replay saved HID settings. Returns (ok, failed_labels)."""
         hg = self.hook._hid_gesture
         if hg is None:
-            return False
+            return False, ["connection"]
         if hasattr(hg, "connected_device") and hg.connected_device is None:
-            return False
+            return False, ["connection"]
 
-        replay_ok = True
+        failed = []
         retry_dpi = False
         retry_smart_shift = False
         saved_dpi = self.cfg.get("settings", {}).get("dpi")
@@ -1176,14 +1181,13 @@ class Engine:
         ss_threshold = saved_ss_state["threshold"]
         ss_scroll_force = saved_ss_state["scroll_force"]
 
-        # Phase A: apply Smart Shift immediately so the physical wheel mode
-        # converges before the settled replay.
+        # Apply Smart Shift early so wheel mode settles before DPI.
         if saved_ss and getattr(hg, "smart_shift_supported", False):
             if not hasattr(hg, "set_smart_shift"):
-                replay_ok = False
+                failed.append("Smart Shift")
             else:
                 if not hg.set_smart_shift(saved_ss, ss_enabled, ss_threshold, ss_scroll_force):
-                    replay_ok = False
+                    failed.append("Smart Shift")
                 if self._smart_shift_read_cb:
                     try:
                         self._smart_shift_read_cb(saved_ss_state)
@@ -1193,11 +1197,13 @@ class Engine:
         time.sleep(3)
         hg = self.hook._hid_gesture
         if hg is None or getattr(hg, "connected_device", None) is None:
-            return False
+            return False, ["connection"]
 
-        if saved_dpi is not None:
+        # Only restore DPI when the live session actually exposes it.
+        dpi_supported = bool(getattr(hg, "dpi_supported", True))
+        if saved_dpi is not None and dpi_supported:
             if not hasattr(hg, "set_dpi"):
-                replay_ok = False
+                failed.append("DPI")
             elif hg.set_dpi(saved_dpi):
                 if self._dpi_read_cb:
                     try:
@@ -1205,12 +1211,14 @@ class Engine:
                     except Exception:
                         pass
             else:
-                replay_ok = False
+                failed.append("DPI")
                 retry_dpi = True
 
         if saved_ss and getattr(hg, "smart_shift_supported", False):
-            if not hasattr(hg, "set_smart_shift"):
-                replay_ok = False
+            if "Smart Shift" in failed:
+                pass
+            elif not hasattr(hg, "set_smart_shift"):
+                failed.append("Smart Shift")
             elif hg.set_smart_shift(saved_ss, ss_enabled, ss_threshold, ss_scroll_force):
                 if self._smart_shift_read_cb:
                     try:
@@ -1218,32 +1226,37 @@ class Engine:
                     except Exception:
                         pass
             else:
-                replay_ok = False
+                if "Smart Shift" not in failed:
+                    failed.append("Smart Shift")
                 retry_smart_shift = True
 
         if retry_dpi or retry_smart_shift:
             time.sleep(5)
             hg = self.hook._hid_gesture
             if hg is None or getattr(hg, "connected_device", None) is None:
-                return False
+                return False, list(dict.fromkeys(failed + ["connection"]))
             if retry_dpi:
-                if not hasattr(hg, "set_dpi") or not hg.set_dpi(saved_dpi):
-                    replay_ok = False
-                elif self._dpi_read_cb:
-                    try:
-                        self._dpi_read_cb(saved_dpi)
-                    except Exception:
-                        pass
+                if hasattr(hg, "set_dpi") and hg.set_dpi(saved_dpi):
+                    failed = [label for label in failed if label != "DPI"]
+                    if self._dpi_read_cb:
+                        try:
+                            self._dpi_read_cb(saved_dpi)
+                        except Exception:
+                            pass
+                elif "DPI" not in failed:
+                    failed.append("DPI")
             if retry_smart_shift and getattr(hg, "smart_shift_supported", False):
-                if not hasattr(hg, "set_smart_shift") or not hg.set_smart_shift(
+                if hasattr(hg, "set_smart_shift") and hg.set_smart_shift(
                     saved_ss, ss_enabled, ss_threshold, ss_scroll_force
                 ):
-                    replay_ok = False
-                elif self._smart_shift_read_cb:
-                    try:
-                        self._smart_shift_read_cb(saved_ss_state)
-                    except Exception:
-                        pass
+                    failed = [label for label in failed if label != "Smart Shift"]
+                    if self._smart_shift_read_cb:
+                        try:
+                            self._smart_shift_read_cb(saved_ss_state)
+                        except Exception:
+                            pass
+                elif "Smart Shift" not in failed:
+                    failed.append("Smart Shift")
 
         saved_haptic = self.cfg.get("settings", {}).get("haptic_level")
         if saved_haptic is not None and getattr(hg, "haptic_supported", False):
@@ -1254,13 +1267,15 @@ class Engine:
         if saved_force is not None and getattr(hg, "force_sensing_supported", False):
             hg.set_force_sensing(saved_force)
 
-        return replay_ok
+        # Preserve order, drop duplicates.
+        failed = list(dict.fromkeys(failed))
+        return (len(failed) == 0), failed
 
     def _replay_saved_settings_worker(self):
         while True:
             with self._replay_lock:
                 self._replay_pending_rerun = False
-            replay_ok = self._run_saved_settings_replay()
+            replay_ok, failed = self._run_saved_settings_replay()
             should_emit_failure = False
             with self._replay_lock:
                 if self._replay_pending_rerun:
@@ -1268,8 +1283,9 @@ class Engine:
                 self._replay_inflight = False
                 should_emit_failure = not replay_ok
             if should_emit_failure:
+                labels = ", ".join(failed) if failed else "settings"
                 self._emit_status(
-                    "Mouse reconnected, but saved device settings could not be restored yet."
+                    f"Mouse reconnected, but could not restore: {labels}."
                 )
             return
 

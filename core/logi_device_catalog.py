@@ -76,7 +76,8 @@ MX_ANYWHERE_SMARTSHIFT_BUTTONS = (
 # firmware emits as standard OS events in its default profile: middle click,
 # back/forward side buttons, and wheel tilt left/right. The DPI up/down and
 # sniper buttons are consumed onboard and never reach the OS. ADJUSTABLE_DPI
-# (0x2201) is exposed, so the DPI slider works.
+# (0x2201) is exposed; Host mode via ONBOARD_PROFILES (0x8100) is required
+# before setSensorDpi writes stick (same as Solaar "Disabled").
 G502_BUTTONS = (
     "middle",
     "xbutton1",
@@ -102,24 +103,6 @@ M650_BUTTONS = (
 # not surfaced, matching the M650 treatment.
 M590_BUTTONS = (
     "middle",
-    "xbutton1",
-    "xbutton2",
-    "hscroll_left",
-    "hscroll_right",
-)
-
-# M720 Triathlon Multi-Device Mouse: middle click, back/forward thumb buttons,
-# wheel tilt PLUS a physical gesture button. The gesture button is CID 0x00D0,
-# a rawXY-capable control (flags 0x0171). It supports click plus the four
-# directional swipes when a rawXY divert succeeds at connect time. This is why
-# the M720 gets its own tuple instead of reusing ``M590_BUTTONS``.
-M720_BUTTONS = (
-    "middle",
-    "gesture",
-    "gesture_left",
-    "gesture_right",
-    "gesture_up",
-    "gesture_down",
     "xbutton1",
     "xbutton2",
     "hscroll_left",
@@ -292,22 +275,6 @@ LOGI_DEVICE_SPECS = (
         "supported_buttons": MX_ANYWHERE_BUTTONS,
         "dpi_max": 4000,
     },
-    {
-        "key": "mx_anywhere_2",
-        "display_name": "MX Anywhere 2",
-        "product_ids": (0xB013, 0xB01F),
-        "aliases": (
-            "Wireless Mouse MX Anywhere 2",
-            "Wireless Mobile Mouse MX Anywhere 2",
-            "MX Anywhere 2",
-            "MX Anywhere 2 for Mac",
-        ),
-        "ui_layout": "mx_anywhere_2s",
-        "image_asset": "logitech-mice/mx_anywhere_2s/mouse.png",
-        "supported_buttons": MX_ANYWHERE_BUTTONS,
-        "dpi_min": 400,
-        "dpi_max": 1600,
-    },
     # -- M650 Signature family ------------------------------------------------
     # Compact wireless mouse (middle, back, forward buttons). Connects via Logi
     # Bolt receiver or Bluetooth LE. HID++ reports device name "Signature M650".
@@ -371,44 +338,6 @@ LOGI_DEVICE_SPECS = (
         "dpi_min": 200,
         "dpi_max": 8000,
     },
-    # -- M720 Triathlon Multi-Device Mouse -----------------------------------
-    # Multi-device mouse. Bluetooth dumps confirm REPROG_CONTROLS_V4 (0x1B04)
-    # and BATTERY_STATUS (0x1000). HIRES_WHEEL_ENHANCED (0x2121) is present
-    # in the Unifying (0x405E) dump, but is not claimed for Bluetooth here.
-    # https://github.com/pwr-Solaar/Solaar/tree/master/docs/devices
-    # Physical controls are middle click (0x0052), back (0x0053), forward (0x0056), the
-    # scroll wheel's left/right tilt (0x005B / 0x005D, horizontal scroll) and
-    # gesture button is CID 0x00D0, a rawXY-capable control (flags 0x0171)
-    # listed first in ``gesture_cids`` so ``_divert`` requests rawXY on it
-    # and directional swipes work. 0x00D7 (firmware virtual gesture control)
-    # is kept as a fallback candidate. DPI is fixed at 1000; there is no
-    # mode-shift or SmartShift.
-    #
-    # Enumerated directly over Bluetooth with the device-specific PID 0xB015,
-    # so it is safe to list. The Unifying WPID (0x405E) is intentionally
-    # omitted: over the receiver it enumerates behind a *shared* receiver PID,
-    # which would over-claim (see the M585/M590 note above and
-    # core/logi_devices.py). Receiver connections still resolve by name/alias.
-    {
-        "key": "m720_triathlon",
-        "display_name": "M720 Triathlon Multi-Device Mouse",
-        "product_ids": (0xB015,),
-        "aliases": (
-            "M720 Triathlon Multi-Device Mouse",
-            # Logitech's M720 setup guide documents this Bluetooth pairing name:
-            # https://www.logitech.com/assets/64937/2/m720-web-qsg.pdf
-            "M720 Triathlon Mouse",
-            "M720 Triathlon",
-            "Logitech M720 Triathlon",
-            "M720",
-        ),
-        "ui_layout": "m720_triathlon",
-        "image_asset": "logitech-mice/m720_triathlon/mouse.svg",
-        "supported_buttons": M720_BUTTONS,
-        "gesture_cids": (0x00D0, 0x00D7),
-        "dpi_min": 1000,
-        "dpi_max": 1000,
-    },
     # -- G502 family ----------------------------------------------------------
     # Product IDs verified against Solaar's device descriptors. Wireless
     # variants list both the wired USB PID and the Lightspeed receiver WPID.
@@ -424,6 +353,8 @@ LOGI_DEVICE_SPECS = (
         "ui_layout": "g502",
         "image_asset": "icons/mouse-simple.svg",
         "supported_buttons": G502_BUTTONS,
+        "gesture_cids": (),
+        "connect_without_reprog": True,
         "dpi_min": 100,
         "dpi_max": 25600,
     },
@@ -438,6 +369,8 @@ LOGI_DEVICE_SPECS = (
         "ui_layout": "g502",
         "image_asset": "icons/mouse-simple.svg",
         "supported_buttons": G502_BUTTONS,
+        "gesture_cids": (),
+        "connect_without_reprog": True,
         "dpi_min": 100,
         "dpi_max": 25600,
     },
@@ -453,6 +386,8 @@ LOGI_DEVICE_SPECS = (
         "ui_layout": "g502",
         "image_asset": "icons/mouse-simple.svg",
         "supported_buttons": G502_BUTTONS,
+        "gesture_cids": (),
+        "connect_without_reprog": True,
         "dpi_min": 100,
         "dpi_max": 25600,
     },
@@ -469,89 +404,15 @@ LOGI_DEVICE_SPECS = (
         "ui_layout": "g502",
         "image_asset": "icons/mouse-simple.svg",
         "supported_buttons": G502_BUTTONS,
+        "gesture_cids": (),
+        "connect_without_reprog": True,
         "dpi_min": 200,
         "dpi_max": 12000,
     },
 )
 
 
-
 LOGI_DEVICE_LAYOUTS = {
-    # Project-authored M720 control schematic. See its shipped credits file.
-    # The targets correspond to the wheel press/tilt, side back/forward, and
-    # thumb gesture controls; the Easy-Switch control is not exposed by HID++.
-    "m720_triathlon": _layout(
-        "m720_triathlon",
-        "M720 Triathlon Multi-Device Mouse",
-        "logitech-mice/m720_triathlon/mouse.svg",
-        431,
-        341,
-        [
-            _hotspot(
-                "middle",
-                "Middle button",
-                "mapping",
-                0.355,
-                0.240,
-                label_side="left",
-                label_off_x=-170,
-                label_off_y=45,
-            ),
-            _hotspot(
-                "gesture",
-                "Gesture button",
-                "gesture",
-                0.297,
-                0.721,
-                label_side="left",
-                label_off_x=-140,
-                label_off_y=58,
-            ),
-            _hotspot(
-                "hscroll_right",
-                "Scroll right",
-                "mapping",
-                0.385,
-                0.246,
-                label_side="right",
-                label_off_x=153,
-                label_off_y=-34,
-                is_hscroll=True,
-            ),
-            _hotspot(
-                "hscroll_left",
-                "Scroll left",
-                "mapping",
-                0.327,
-                0.235,
-                label_side="left",
-                label_off_x=-132,
-                label_off_y=-25,
-                is_hscroll=True,
-            ),
-            _hotspot(
-                "xbutton2",
-                "Forward button",
-                "mapping",
-                0.364,
-                0.516,
-                label_side="right",
-                label_off_x=145,
-                label_off_y=20,
-            ),
-            _hotspot(
-                "xbutton1",
-                "Back button",
-                "mapping",
-                0.248,
-                0.551,
-                label_side="left",
-                label_off_x=-190,
-                label_off_y=27,
-            ),
-        ],
-        manual_selectable=True,
-    ),
     # M650 Signature: no device art yet; shows generic silhouette with the
     # three-button layout. Interactive hotspot diagram can be added once
     # mouse artwork is sourced and product_ids are confirmed.
