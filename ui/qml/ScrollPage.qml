@@ -289,6 +289,58 @@ Item {
                             }
                         }
                     }
+
+                    Rectangle {
+                        width: parent.width
+                        height: hostModeRow.implicitHeight + 20
+                        radius: 10
+                        color: scrollPage.theme.bgSubtle
+                        visible: backend.osLevelConnect || backend.preferHostModeForDpi
+
+                        RowLayout {
+                            id: hostModeRow
+                            anchors {
+                                fill: parent
+                                leftMargin: 14
+                                rightMargin: 14
+                                topMargin: 10
+                                bottomMargin: 10
+                            }
+                            spacing: 12
+
+                            Column {
+                                Layout.fillWidth: true
+                                spacing: 3
+
+                                Text {
+                                    text: s["scroll.host_mode_dpi"]
+                                    font {
+                                        family: uiState.fontFamily
+                                        pixelSize: 13
+                                    }
+                                    color: scrollPage.theme.textPrimary
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: s["scroll.host_mode_dpi_desc"]
+                                    font {
+                                        family: uiState.fontFamily
+                                        pixelSize: 11
+                                    }
+                                    color: scrollPage.theme.textSecondary
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            Switch {
+                                checked: backend.preferHostModeForDpi
+                                Material.accent: scrollPage.theme.accent
+                                Accessible.name: s["scroll.host_mode_dpi"]
+                                onToggled: backend.setPreferHostModeForDpi(checked)
+                            }
+                        }
+                    }
                 }
             }
 

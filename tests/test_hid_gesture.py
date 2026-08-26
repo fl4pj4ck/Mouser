@@ -448,6 +448,60 @@ class HidDiscoveryDiagnosticsTests(unittest.TestCase):
         self.assertTrue(listener._dpi_result)
         self.assertEqual(calls, [(0x07, 3, [0x00, 0x09, 0x60])])
 
+    def test_host_mode_switch_once_when_prefer_enabled(self):
+        """Opt-in Host mode uses 0x8100 once; never via setSensorDpi."""
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener._dev_idx = 0x01
+        listener._feat_idx = None
+        listener._dpi_idx = 0x07
+        listener.set_prefer_host_mode(True)
+        calls = []
+
+        def fake_find_feature(feature_id, timeout_ms=None):
+            if feature_id == hid_gesture.FEAT_ONBOARD_PROFILES:
+                return 0x09
+            return None
+
+        def fake_request(feat, func, params, timeout_ms=2000, count_timeout=True):
+            calls.append((feat, func, list(params), count_timeout))
+            if feat == 0x09 and func == 2:
+                return (0x11, 0x09, 0x2, 0xA, [hid_gesture.ONBOARD_MODE_ONBOARD])
+            if feat == 0x09 and func == 1:
+                return (0x11, 0x09, 0x1, 0xA, [hid_gesture.ONBOARD_MODE_HOST])
+            return None
+
+        with (
+            patch.object(listener, "_find_feature", side_effect=fake_find_feature),
+            patch.object(listener, "_request", side_effect=fake_request),
+            patch("builtins.print"),
+        ):
+            self.assertTrue(listener._apply_host_mode_once())
+            self.assertTrue(listener._apply_host_mode_once())
+
+        host_sets = [
+            c for c in calls
+            if c[0] == 0x09 and c[1] == 1
+        ]
+        self.assertEqual(len(host_sets), 1)
+        self.assertEqual(host_sets[0][2], [hid_gesture.ONBOARD_MODE_HOST])
+        self.assertFalse(host_sets[0][3])
+
+    def test_host_mode_skipped_when_prefer_disabled(self):
+        listener = hid_gesture.HidGestureListener()
+        listener._dev = _FakeHidDevice()
+        listener.set_prefer_host_mode(False)
+
+        with (
+            patch.object(listener, "_find_feature") as find_mock,
+            patch.object(listener, "_request") as request_mock,
+            patch("builtins.print"),
+        ):
+            self.assertTrue(listener._apply_host_mode_once())
+
+        find_mock.assert_not_called()
+        request_mock.assert_not_called()
+
     def test_vendor_hid_infos_skips_windows_vhf_wpid_stub(self):
         """User dump: PID 0x4099 / HID VHF Driver / UP 0x59 is not HID++."""
         infos = [

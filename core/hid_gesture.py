@@ -961,6 +961,12 @@ FEAT_DEVICE_NAME    = 0x0005      # Device Name & Type
 FEAT_BATTERY_STATUS = 0x1000      # Battery Status (fallback)
 FEAT_HAPTIC         = 0x19B0      # Haptic Feedback (MX Master 4)
 FEAT_FORCE_SENSING  = 0x19C0      # Force Sensing Button (MX Master 4)
+FEAT_ONBOARD_PROFILES = 0x8100    # Onboard Profiles / Host vs Onboard mode
+
+# ONBOARD_PROFILES mode bytes (Solaar OnboardMode). Host can make software
+# DPI stickier across wake, but has reset LEDs / link on some G502 paths.
+ONBOARD_MODE_ONBOARD = 0x01
+ONBOARD_MODE_HOST = 0x02
 DEFAULT_GESTURE_CID = DEFAULT_GESTURE_CIDS[0]
 
 # REPROG_V4 ``setCidReporting`` control flags (fn 3 byte 2). The
@@ -1153,6 +1159,12 @@ class HidGestureListener:
         self._running   = False
         self._feat_idx  = None          # feature index of REPROG_V4
         self._dpi_idx   = None          # feature index of ADJUSTABLE_DPI
+        self._onboard_profiles_idx = None  # feature index of ONBOARD_PROFILES
+        self._prefer_host_mode = False
+        self._host_mode_applied = False
+        self._pending_host_mode = False
+        self._host_mode_result = None
+        self._host_mode_event = threading.Event()
         self._battery_idx = None
         self._battery_feature_id = None
         self._dev_idx   = BT_DEV_IDX
@@ -2156,6 +2168,81 @@ class HidGestureListener:
             and self._feat_idx is None
         )
 
+    def set_prefer_host_mode(self, enabled):
+        """Opt-in Host mode for DPI persistence (G502). Default off."""
+        self._prefer_host_mode = bool(enabled)
+
+    def ensure_host_mode(self):
+        """Queue a one-shot Host switch when prefer is on. Any-thread safe."""
+        if not self._prefer_host_mode:
+            return True
+        if self._host_mode_applied:
+            return True
+        self._host_mode_result = None
+        self._host_mode_event.clear()
+        self._pending_host_mode = True
+        if not self._host_mode_event.wait(5.0):
+            print("[HidGesture] Host mode switch timed out")
+            self._pending_host_mode = False
+            return False
+        return self._host_mode_result is True
+
+    def _apply_host_mode_once(self):
+        """Listener-thread: switch ONBOARD_PROFILES to Host at most once."""
+        if not self._prefer_host_mode:
+            return True
+        if self._host_mode_applied:
+            return True
+        if self._dev is None:
+            return False
+
+        if self._onboard_profiles_idx is None:
+            fi = self._find_feature(
+                FEAT_ONBOARD_PROFILES, timeout_ms=800
+            )
+            if fi is None:
+                print("[HidGesture] ONBOARD_PROFILES not found — Host skipped")
+                self._host_mode_applied = True
+                return False
+            self._onboard_profiles_idx = fi
+
+        # getOnboardMode (fn 2) then setOnboardMode (fn 1) — count_timeout off
+        # so a missing/slow gaming feature does not trip reconnect.
+        current = self._request(
+            self._onboard_profiles_idx,
+            2,
+            [],
+            timeout_ms=800,
+            count_timeout=False,
+        )
+        if current and current[4] and current[4][0] == ONBOARD_MODE_HOST:
+            print("[HidGesture] Already in Host mode")
+            self._host_mode_applied = True
+            return True
+
+        resp = self._request(
+            self._onboard_profiles_idx,
+            1,
+            [ONBOARD_MODE_HOST],
+            timeout_ms=800,
+            count_timeout=False,
+        )
+        if not resp:
+            print("[HidGesture] Host mode set FAILED")
+            return False
+
+        print("[HidGesture] Switched to Host mode (DPI persistence opt-in)")
+        self._host_mode_applied = True
+        return True
+
+    def _apply_pending_host_mode(self):
+        if not self._pending_host_mode:
+            return
+        ok = self._apply_host_mode_once()
+        self._host_mode_result = ok
+        self._pending_host_mode = False
+        self._host_mode_event.set()
+
     @property
     def hires_wheel_supported(self):
         return self._hires_wheel_idx is not None
@@ -2871,6 +2958,9 @@ class HidGestureListener:
         self._pending_dpi = None
         self._dpi_result = None
         self._dpi_event.set()
+        self._pending_host_mode = False
+        self._host_mode_result = None
+        self._host_mode_event.set()
         self._abort_pending_smart_shift()
         self._abort_pending_wheel_divert()
         self._pending_haptic = None
@@ -3123,6 +3213,9 @@ class HidGestureListener:
             ar_cid = getattr(device_spec, "thumb_button_cid", None)
             if ar_cid is not None:
                 self._button_only_cids.add(int(ar_cid))
+            self._onboard_profiles_idx = None
+            self._host_mode_applied = False
+            self._pending_host_mode = False
             self._rawxy_enabled = False
             self._hires_wheel_idx = None
             self._hires_wheel_multiplier = None
@@ -3560,6 +3653,8 @@ class HidGestureListener:
                     except Exception as exc:
                         print(f"[HidGesture] Cache write skipped: {exc}")
                     self._reprog_absent_until.pop(cand_key, None)
+                    if self._prefer_host_mode:
+                        self._apply_host_mode_once()
                     return True
 
                 if may_os_connect:
@@ -3697,6 +3792,10 @@ class HidGestureListener:
                             self._on_report(raw)
                         continue
 
+                    # Opt-in Host mode before DPI so replay writes stickier.
+                    if self._pending_host_mode:
+                        self._apply_pending_host_mode()
+
                     # Apply any queued DPI command
                     if self._pending_dpi is not None:
                         if self._pending_dpi == "read":
@@ -3753,6 +3852,9 @@ class HidGestureListener:
             self._force_sensing_idx = None
             self._force_sensing_range = None
             self._haptic_capabilities = None
+            self._onboard_profiles_idx = None
+            self._host_mode_applied = False
+            self._pending_host_mode = False
             if self._held:
                 self._held = False
                 print("[HidGesture] Gesture force-released on disconnect")

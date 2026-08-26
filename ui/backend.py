@@ -849,6 +849,20 @@ class Backend(QObject):
     def ignoreTrackpad(self):
         return self._cfg.get("settings", {}).get("ignore_trackpad", True)
 
+    @Property(bool, notify=settingsChanged)
+    def preferHostModeForDpi(self):
+        return bool(
+            self._cfg.get("settings", {}).get("prefer_host_mode_for_dpi", False)
+        )
+
+    @Property(bool, notify=hidFeaturesReadyChanged)
+    def osLevelConnect(self):
+        """True for G502-style sessions connected without REPROG_V4."""
+        if not self._engine:
+            return False
+        hg = getattr(getattr(self._engine, "hook", None), "_hid_gesture", None)
+        return bool(getattr(hg, "os_level_connect", False))
+
     @Property(int, notify=settingsChanged)
     def gestureThreshold(self):
         return int(self._cfg.get("settings", {}).get("gesture_threshold", 50))
@@ -1831,6 +1845,22 @@ class Backend(QObject):
         if self._engine:
             self._engine.reload_mappings()
         self.settingsChanged.emit()
+
+    @Slot(bool)
+    def setPreferHostModeForDpi(self, value):
+        value = bool(value)
+        if self.preferHostModeForDpi == value:
+            return
+        self._cfg.setdefault("settings", {})["prefer_host_mode_for_dpi"] = value
+        save_config(self._cfg)
+        if self._engine and hasattr(self._engine, "set_prefer_host_mode_for_dpi"):
+            self._engine.set_prefer_host_mode_for_dpi(value)
+        self.settingsChanged.emit()
+        self.statusMessage.emit(
+            "Host mode for DPI enabled — reconnect if DPI still resets"
+            if value
+            else "Host mode for DPI disabled"
+        )
 
     @Slot(int)
     def setGestureThreshold(self, value):

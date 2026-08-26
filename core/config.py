@@ -270,6 +270,9 @@ DEFAULT_CONFIG = {
         "invert_hscroll": False,  # swap horizontal scroll directions
         "invert_vscroll": False,  # swap vertical scroll directions
         "dpi": 1000,              # pointer speed / DPI setting
+        # G502: optional ONBOARD_PROFILES Host mode for DPI persistence.
+        # Default off — Host has reset LEDs / link on some gaming paths.
+        "prefer_host_mode_for_dpi": False,
         "smart_shift_mode": "ratchet",
         "smart_shift_enabled": False,
         "smart_shift_threshold": 25,

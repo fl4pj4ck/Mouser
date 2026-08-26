@@ -323,6 +323,7 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
         dpi_supported=True,
         os_level_connect=False,
         smart_shift_supported=True,
+        read_dpi_result=None,
     ):
         return SimpleNamespace(
             connected_device=connected_device,
@@ -332,6 +333,9 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
             smart_shift_supported=smart_shift_supported,
             dpi_supported=dpi_supported,
             os_level_connect=os_level_connect,
+            read_dpi=Mock(return_value=read_dpi_result),
+            set_prefer_host_mode=Mock(),
+            ensure_host_mode=Mock(return_value=True),
         )
 
     def test_hid_ready_transition_requests_replay_worker(self):
@@ -575,7 +579,7 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
         )
 
     def test_connection_only_restore_failure_skips_toast(self):
-        # Brief hid_ready then drop during the 3s settle must not spam toasts.
+        # Brief hid_ready then drop during the settle must not spam toasts.
         engine = self._make_engine()
         status_messages = []
         engine.set_status_callback(status_messages.append)
@@ -606,6 +610,49 @@ class EngineReplayPhaseOneTests(unittest.TestCase):
             any("could not restore" in message.lower() for message in status_messages),
             status_messages,
         )
+
+    def test_g502_replay_uses_short_settle_and_verifies_dpi(self):
+        engine = self._make_engine()
+        engine.cfg["settings"]["dpi"] = 1600
+        engine.hook._hid_gesture = self._make_hid(
+            connected_device=SimpleNamespace(name="G502 X"),
+            dpi_result=True,
+            smart_shift_supported=False,
+            os_level_connect=True,
+            dpi_supported=True,
+            read_dpi_result=1000,
+        )
+        sleeps = []
+
+        with patch("core.engine.time.sleep", side_effect=lambda s: sleeps.append(s)):
+            ok, failed = engine._run_saved_settings_replay()
+
+        self.assertTrue(ok)
+        self.assertEqual(failed, [])
+        self.assertEqual(sleeps[0], 1.0)
+        self.assertGreaterEqual(engine.hook._hid_gesture.set_dpi.call_count, 2)
+        engine.hook._hid_gesture.read_dpi.assert_called()
+
+    def test_g502_replay_applies_host_mode_when_preferred(self):
+        engine = self._make_engine()
+        engine.cfg["settings"]["prefer_host_mode_for_dpi"] = True
+        engine.hook._hid_gesture = self._make_hid(
+            connected_device=SimpleNamespace(name="G502 X"),
+            dpi_result=True,
+            smart_shift_supported=False,
+            os_level_connect=True,
+            dpi_supported=True,
+            read_dpi_result=1600,
+        )
+        engine.cfg["settings"]["dpi"] = 1600
+
+        with patch("core.engine.time.sleep", return_value=None):
+            ok, failed = engine._run_saved_settings_replay()
+
+        self.assertTrue(ok)
+        self.assertEqual(failed, [])
+        engine.hook._hid_gesture.set_prefer_host_mode.assert_called_with(True)
+        engine.hook._hid_gesture.ensure_host_mode.assert_called_once()
 
     def test_battery_poll_skips_smart_shift_reads_while_replay_is_inflight(self):
         engine = self._make_engine()
